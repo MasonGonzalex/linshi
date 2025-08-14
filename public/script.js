@@ -1,4 +1,4 @@
-// public/script.js (Final Stable Version - Collapsible Thought Process)
+// public/script.js (Final Stable Version - Collapsible Thought Process via Polling)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -218,6 +218,7 @@ document.addEventListener("DOMContentLoaded", () => {
       chatBox.innerHTML = `<div class="message assistant" style="color:red">加载消息失败: ${error.message}</div>`;
     }
   }
+
   function renderSessions() {
     sessionList.innerHTML = "";
     if (!state.sessions || !Array.isArray(state.sessions)) return;
@@ -295,7 +296,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const messageDiv = document.createElement("div");
     messageDiv.className = "message assistant";
 
-    const thoughtBlock = data.thought ? `
+    const thoughtBlock = (data.thought && data.thought.trim() !== '') ? `
       <div class="thinking-header">
           <span class="timer">思考过程</span>
           <span class="toggle-thought">
@@ -314,7 +315,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     chatBox.appendChild(messageDiv);
 
-    if (data.thought) {
+    if (data.thought && data.thought.trim() !== '') {
       const header = messageDiv.querySelector(".thinking-header");
       const thoughtWrapper = messageDiv.querySelector(".thought-wrapper");
       header.addEventListener("click", () => {
@@ -432,7 +433,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             if (hasNewContent) {
-              const thoughtBlock = thoughtContent ? `
+                const thoughtBlock = (thoughtContent.trim() !== '') ? `
                 <div class="thinking-header">
                     <span class="timer">思考过程</span>
                     <span class="toggle-thought">
@@ -480,7 +481,10 @@ document.addEventListener("DOMContentLoaded", () => {
         role: "assistant",
         content: JSON.stringify(messageData)
       };
+      // 移除临时消息占位符（如果有的话）
+      const tempUserMessageIndex = state.currentMessages.findIndex(m => m.role === 'user' && m.content === userMessage);
       state.currentMessages.push(finalMessage);
+
 
       try {
         await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
