@@ -1,8 +1,8 @@
-<!-- public/index.html (最终毕业版) -->
+<!-- public/index.html (最终确认版) -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF--8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>智核 AI (Cloud-Based AI Chat)</title>
     <link rel="stylesheet" href="style.css">
@@ -55,10 +55,12 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <!-- ======================= 新增代码 开始 ======================= -->
-    <!-- 为旧版浏览器 (如 Safari 14.0) 添加 ReadableStream 的 Polyfill -->
+    
+    <!-- ======================= 这是解决问题的关键！======================= -->
+    <!-- 为旧版浏览器 (如 Safari 14) 添加 ReadableStream 的 Polyfill -->
     <script src="https://cdn.jsdelivr.net/npm/web-streams-polyfill@3.2.1/dist/polyfill.min.js"></script>
-    <!-- ======================= 新增代码 结束 ======================= -->
+    <!-- ======================= 必须确保这行代码存在 ======================= -->
+    
     <script src="script.js"></script>
 </body>
 </html>

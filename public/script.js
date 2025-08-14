@@ -140,7 +140,6 @@ document.addEventListener("DOMContentLoaded", () => {
     drawerOverlay.classList.remove("visible");
   });
 
-  // ======================= 终极BUG修复区域 1: 加固网络请求函数 =======================
   async function apiRequest(url, options = {}) {
     const defaultHeaders = {
       "Content-Type": "application/json",
@@ -157,15 +156,12 @@ document.addEventListener("DOMContentLoaded", () => {
       throw new Error("登录已过期，请重新登录。");
     }
     
-    // 优雅地处理可能为空的响应体
     const responseText = await response.text();
     let data;
     try {
         data = responseText ? JSON.parse(responseText) : {};
     } catch(e) {
-        // 如果解析失败，但请求是成功的，可能是一个非JSON的成功响应
-        if(response.ok) return { _raw: responseText }; // 返回原始文本
-        // 如果解析失败且请求也失败了，抛出网络错误
+        if(response.ok) return { _raw: responseText };
         throw new Error(`网络请求失败，状态码: ${response.status}`);
     }
 
@@ -175,7 +171,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     return data;
   }
-  // ======================= 修复结束 =======================
 
   async function loadSessions() {
     try {
@@ -191,7 +186,6 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (error) {
       console.error("加载对话列表失败:", error);
-      // alert(error.message); // Commented out to avoid annoying popups
     }
   }
   async function createNewSession() {
@@ -325,10 +319,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- 聊天与 API 交互 (Chat & API Interaction) ---
-  // ======================= 终极BUG修复区域 2: 统一使用apiRequest =======================
   async function loadApiProviders() {
     try {
-      const providers = await apiRequest("/api/providers"); // 使用封装好的函数
+      const providers = await apiRequest("/api/providers");
       state.apiProviders = providers;
       modelSelect.innerHTML = "";
       providers.forEach((provider, index) => {
@@ -345,7 +338,6 @@ document.addEventListener("DOMContentLoaded", () => {
       modelSelect.innerHTML = "<option>加载失败</option>";
     }
   }
-  // ======================= 修复结束 =======================
 
   userInput.addEventListener("input", () => {
     sendButton.disabled = !userInput.value.trim();
@@ -387,14 +379,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
         const response = await fetch("/api/chat-stream", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "x-access-token": state.token,
-            },
-            body: JSON.stringify({
-                messages: state.currentMessages,
-                apiId: apiId,
-            }),
+            headers: { "Content-Type": "application/json", "x-access-token": state.token, },
+            body: JSON.stringify({ messages: state.currentMessages, apiId: apiId, }),
         });
 
         if (!response.ok || !response.body) {
@@ -412,7 +398,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 doneReading = true;
                 break;
             }
-
             const chunk = decoder.decode(value, { stream: true });
             const dataBlocks = chunk.split("\n\n");
 
@@ -433,22 +418,19 @@ document.addEventListener("DOMContentLoaded", () => {
                     
                     tempAssistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
                     chatBox.scrollTop = chatBox.scrollHeight;
-
-                } catch (e) {
-                    console.error("解析流数据块失败:", e, "块内容:", block);
-                }
+                } catch (e) { console.error("解析流数据块失败:", e, "块内容:", block); }
             }
         }
     } catch (error) {
         tempAssistantMessageDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`;
-        return; // Exit early on error
+        return;
     } finally {
-        tempAssistantMessageDiv.remove(); // Remove the temporary message
+        tempAssistantMessageDiv.remove();
 
         const duration = ((Date.now() - startTime) / 1000).toFixed(1);
         const messageData = { thought: thoughtContent, answer: finalAnswerContent, duration: duration };
         
-        renderThinkingMessage(messageData); // Render the final card
+        renderThinkingMessage(messageData);
         chatBox.scrollTop = chatBox.scrollHeight;
 
         const finalMessage = { role: "assistant", content: JSON.stringify(messageData) };
