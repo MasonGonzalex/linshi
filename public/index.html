@@ -3,46 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>【诊断V6】HTML渲染测试</title>
+    <title>智核 AI (Cloud-Based AI Chat)</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 </head>
 <body>
-    <!-- 隐藏所有与测试无关的元素 -->
-    <div id="history-drawer" class="sidebar-drawer" style="display: none;"></div>
-    <div id="drawer-overlay" class="drawer-overlay" style="display: none;"></div>
-    <div id="app-container" class="main-container hidden" style="display: none;"></div>
-
-    <!-- 只显示登录容器 -->
-    <div id="auth-container" class="auth-overlay">
-        <div class="auth-box">
-            <h2 id="auth-title">登录</h2>
-            <form id="auth-form" style="border: 2px dashed blue;">
-                <input type="text" id="auth-username" placeholder="用户名" required>
-                <input type="password" id="auth-password" placeholder="密码 (至少6位)" required>
-                
-                <!-- ======================= 核心修改在这里 ======================= -->
-                <!-- 移除了 type="submit"，改用普通 button -->
-                <!-- 使用内联样式强制显示，并用鲜艳颜色标记 -->
-                <button id="auth-submit-btn-test" type="button" 
-                        style="display: block !important; visibility: visible !important; height: 50px !important; width: 100% !important; background-color: red !important; color: white !important; border: 2px solid yellow !important; margin-top: 10px;">
-                    这是登录按钮吗？
+    <!-- 历史记录抽屉容器 -->
+    <div id="history-drawer" class="sidebar-drawer">
+        <div class="sidebar">
+            <button id="new-chat-btn">+ 新建对话</button>
+            <ul id="session-list"></ul>
+            <div id="user-info">
+                <span id="username-display"></span>
+                <button id="logout-btn">退出登录</button>
+            </div>
+        </div>
+    </div>
+    <div id="drawer-overlay" class="drawer-overlay"></div>
+    
+    <!-- 主应用容器，默认隐藏 -->
+    <div id="app-container" class="main-container hidden">
+        <div class="chat-container">
+            <div class="header">
+                <button id="history-toggle-btn" title="历史记录">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M12 8v4l2 2"></path></svg>
                 </button>
-                
-                <a href="#" id="switch-auth-mode-test" 
-                   style="display: block !important; visibility: visible !important; height: 30px !important; width: 100% !important; background-color: green !important; color: white !important; border: 2px solid yellow !important; text-align: center; margin-top: 10px;">
-                    这是切换链接吗？
-                </a>
-                <!-- ======================= 修改结束 ======================= -->
-
+                <select id="model-select"></select>
+            </div>
+            <div id="chat-box" class="chat-box"></div>
+            <form id="chat-form" class="chat-form">
+                <input type="text" id="user-input" placeholder="在这里输入你的问题..." autocomplete="off">
+                <button type="submit">发送</button>
             </form>
-            <p id="auth-message"></p>
         </div>
     </div>
 
-    <!-- 不加载任何外部脚本，除了我们自己的空脚本 -->
-    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script> -->
-    <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script> -->
-    <!-- <script src="https://cdn.jsdelivr.net/npm/web-streams-polyfill@3.2.1/dist/polyfill.min.js"></script> -->
+    <!-- 登录/注册模态框 -->
+    <div id="auth-container" class="auth-overlay">
+        <div class="auth-box">
+            <h2 id="auth-title">登录</h2>
+            <form id="auth-form">
+                <input type="text" id="auth-username" placeholder="用户名" required>
+                <input type="password" id="auth-password" placeholder="密码 (至少6位)" required>
+                <button type="submit" id="auth-submit-btn">登录</button>
+            </form>
+            <p id="auth-message"></p>
+            <a href="#" id="switch-auth-mode">没有账号？点击注册</a>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/web-streams-polyfill@3.2.1/dist/polyfill.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
