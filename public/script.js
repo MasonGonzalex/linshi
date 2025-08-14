@@ -1,6 +1,6 @@
-// public/script.js (Final Stable Version - Collapsible Thought Process via Polling)
+// public/script.js (Final Stable Version - Polling Logic Corrected)
 document.addEventListener("DOMContentLoaded", () => {
-  // --- 状态管理 (State Management) ---
+  // --- State & DOM Selectors ---
   let state = {
     sessions: [],
     activeSessionId: null,
@@ -10,8 +10,6 @@ document.addEventListener("DOMContentLoaded", () => {
     currentMessages: [],
     apiProviders: [],
   };
-
-  // --- DOM 元素选择器 (DOM Element Selectors) ---
   const appContainer = document.getElementById("app-container");
   const authContainer = document.getElementById("auth-container");
   const authForm = document.getElementById("auth-form");
@@ -34,7 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const drawerOverlay = document.getElementById("drawer-overlay");
   const sendButton = chatForm.querySelector("button[type=submit]");
 
-  // --- 依赖库配置 (Library Configuration) ---
+  // --- Library Config ---
   marked.setOptions({
     highlight: function(code, lang) {
       const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
@@ -53,7 +51,7 @@ document.addEventListener("DOMContentLoaded", () => {
     },
   });
 
-  // --- 认证相关功能 (Authentication Functions) ---
+  // --- Auth Functions ---
   function toggleAuthModeUI() {
     authMessage.textContent = "";
     if (state.isRegisterMode) {
@@ -127,7 +125,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- 侧边栏与会话管理 (Sidebar & Session Management) ---
+  // --- Sidebar & Session Management ---
   historyToggleBtn.addEventListener("click", () => {
     historyDrawer.classList.toggle("open");
     drawerOverlay.classList.toggle("visible");
@@ -136,7 +134,6 @@ document.addEventListener("DOMContentLoaded", () => {
     historyDrawer.classList.remove("open");
     drawerOverlay.classList.remove("visible");
   });
-
   async function apiRequest(url, options = {}) {
     const defaultHeaders = {
       "Content-Type": "application/json",
@@ -145,10 +142,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (state.token) {
       defaultHeaders["x-access-token"] = state.token;
     }
-
     const response = await fetch(url, {
       ...options,
-      headers: defaultHeaders,
+      headers: defaultHeaders
     });
     if (response.status === 401) {
       logoutBtn.click();
@@ -159,19 +155,15 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       data = text ? JSON.parse(text) : {};
     } catch (e) {
-      console.error("JSON parsing error:", e, "for response text:", text);
       data = {
-        error: "Invalid response from server",
-        _raw: text
+        error: "Invalid response from server"
       };
     }
-
     if (!response.ok) {
       throw new Error(data.message || data.error || "请求失败");
     }
     return data;
   }
-
   async function loadSessions() {
     try {
       const sessions = await apiRequest("/api/sessions");
@@ -189,7 +181,6 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error("加载对话列表失败:", error);
     }
   }
-
   async function createNewSession() {
     try {
       const newSession = await apiRequest("/api/sessions", {
@@ -202,7 +193,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
   newChatBtn.addEventListener("click", createNewSession);
-
   async function loadSessionMessages(sessionId) {
     historyDrawer.classList.remove("open");
     drawerOverlay.classList.remove("visible");
@@ -218,7 +208,6 @@ document.addEventListener("DOMContentLoaded", () => {
       chatBox.innerHTML = `<div class="message assistant" style="color:red">加载消息失败: ${error.message}</div>`;
     }
   }
-
   function renderSessions() {
     sessionList.innerHTML = "";
     if (!state.sessions || !Array.isArray(state.sessions)) return;
@@ -251,7 +240,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // --- 消息渲染 (Message Rendering) ---
+  // --- Message Rendering ---
   function renderMessages() {
     chatBox.innerHTML = "";
     if (state.currentMessages) {
@@ -275,7 +264,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     chatBox.scrollTop = chatBox.scrollHeight;
   }
-
   function renderSimpleMessage(content, role) {
     const messageDiv = document.createElement("div");
     messageDiv.classList.add("message", role);
@@ -291,7 +279,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     return messageDiv;
   }
-
   function renderThinkingMessage(data) {
     const messageDiv = document.createElement("div");
     messageDiv.className = "message assistant";
@@ -331,8 +318,7 @@ document.addEventListener("DOMContentLoaded", () => {
     return messageDiv;
   }
 
-
-  // --- 聊天与 API 交互 (Chat & API Interaction) ---
+  // --- Chat & API Interaction ---
   async function loadApiProviders() {
     try {
       const providers = await apiRequest("/api/providers");
@@ -352,11 +338,9 @@ document.addEventListener("DOMContentLoaded", () => {
       modelSelect.innerHTML = "<option>加载失败</option>";
     }
   }
-
   userInput.addEventListener("input", () => {
     sendButton.disabled = !userInput.value.trim();
   });
-
   chatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const message = userInput.value.trim();
@@ -384,12 +368,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function handleStreamingChat(apiId, userMessage) {
     const startTime = Date.now();
-    const assistantMessageDiv = document.createElement("div");
-    assistantMessageDiv.className = "message assistant";
-    chatBox.appendChild(assistantMessageDiv);
+    const tempMessageDiv = document.createElement("div");
+    tempMessageDiv.className = "message assistant";
+    chatBox.appendChild(tempMessageDiv);
 
-    let thoughtContent = "";
-    let finalAnswerContent = "";
+    let currentThought = "";
+    let currentAnswer = "";
 
     try {
       const requestResponse = await apiRequest("/api/chat-request", {
@@ -399,10 +383,7 @@ document.addEventListener("DOMContentLoaded", () => {
           apiId: apiId
         }),
       });
-
-      if (!requestResponse.taskId) {
-        throw new Error("未能获取有效的任务ID");
-      }
+      if (!requestResponse.taskId) throw new Error("未能获取有效的任务ID");
       const {
         taskId
       } = requestResponse;
@@ -411,29 +392,16 @@ document.addEventListener("DOMContentLoaded", () => {
         const intervalId = setInterval(async () => {
           try {
             const pollResponse = await apiRequest(`/api/chat-poll/${taskId}`);
-
             if (pollResponse.error) {
               clearInterval(intervalId);
-              reject(new Error(pollResponse.error));
-              return;
+              return reject(new Error(pollResponse.error));
             }
 
-            let hasNewContent = false;
-            if (pollResponse.thoughts && pollResponse.thoughts.length > 0) {
-              pollResponse.thoughts.forEach(chunk => {
-                thoughtContent += chunk;
-              });
-              hasNewContent = true;
-            }
-            if (pollResponse.answers && pollResponse.answers.length > 0) {
-              pollResponse.answers.forEach(chunk => {
-                finalAnswerContent += chunk;
-              });
-              hasNewContent = true;
-            }
+            if (pollResponse.fullThought !== currentThought || pollResponse.fullAnswer !== currentAnswer) {
+              currentThought = pollResponse.fullThought;
+              currentAnswer = pollResponse.fullAnswer;
 
-            if (hasNewContent) {
-                const thoughtBlock = (thoughtContent.trim() !== '') ? `
+              const thoughtBlock = (currentThought && currentThought.trim() !== '') ? `
                 <div class="thinking-header">
                     <span class="timer">思考过程</span>
                     <span class="toggle-thought">
@@ -441,14 +409,25 @@ document.addEventListener("DOMContentLoaded", () => {
                     </span>
                 </div>
                 <div class="thought-wrapper collapsed">
-                    <div class="thought-process">${marked.parse(thoughtContent + "▋")}</div>
+                    <div class="thought-process">${marked.parse(currentThought)}</div>
                 </div>` : '';
-              
+
               const cursor = pollResponse.done ? "" : "▋";
-              assistantMessageDiv.innerHTML = `
+              tempMessageDiv.innerHTML = `
                 ${thoughtBlock}
-                <div class="final-answer">${marked.parse(finalAnswerContent + cursor)}</div>
+                <div class="final-answer">${marked.parse(currentAnswer + cursor)}</div>
               `;
+              
+              // Re-add click listener for thought header if it was just created
+              const header = tempMessageDiv.querySelector(".thinking-header");
+              if(header) {
+                  header.addEventListener('click', () => {
+                      const wrapper = tempMessageDiv.querySelector(".thought-wrapper");
+                      wrapper.classList.toggle("collapsed");
+                      header.querySelector(".arrow").classList.toggle("down");
+                  });
+              }
+              
               chatBox.scrollTop = chatBox.scrollHeight;
             }
 
@@ -462,18 +441,16 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         }, 300);
       });
-
     } catch (error) {
-      assistantMessageDiv.innerHTML = `<div class="final-answer"><span style="color: red;">请求处理错误: ${error.message}</span></div>`;
+      tempMessageDiv.innerHTML = `<div class="final-answer"><span style="color: red;">请求处理错误: ${error.message}</span></div>`;
       return;
     } finally {
-      assistantMessageDiv.remove();
+      tempMessageDiv.remove();
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
       const messageData = {
-        thought: thoughtContent,
-        answer: finalAnswerContent,
-        duration: duration,
+        thought: currentThought,
+        answer: currentAnswer,
+        duration: duration
       };
       renderThinkingMessage(messageData);
 
@@ -481,10 +458,7 @@ document.addEventListener("DOMContentLoaded", () => {
         role: "assistant",
         content: JSON.stringify(messageData)
       };
-      // 移除临时消息占位符（如果有的话）
-      const tempUserMessageIndex = state.currentMessages.findIndex(m => m.role === 'user' && m.content === userMessage);
       state.currentMessages.push(finalMessage);
-
 
       try {
         await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
@@ -520,7 +494,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- 应用初始化 (App Initialization) ---
+  // --- App Initialization ---
   async function initializeApp() {
     state.token = localStorage.getItem("accessToken");
     state.username = localStorage.getItem("username");

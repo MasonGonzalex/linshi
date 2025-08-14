@@ -1,4 +1,4 @@
-// server.js (最终功能版 - 支持思考过程)
+// server.js (Final Stable Version - Polling Logic Corrected)
 const express = require("express");
 const fetch = (...args) => import("node-fetch").then(({
   default: fetch
@@ -20,8 +20,7 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "a-very-strong-secret-key-that-you-should-change";
 const agent = process.env.HTTPS_PROXY ? new HttpsProxyAgent(process.env.HTTPS_PROXY) : null;
 
-// 修改：临时存储现在需要区分 thought 和 answer
-const taskStorage = {}; // { taskId: { thoughts: [], answers: [], done: false, error: null } }
+const taskStorage = {};
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -43,7 +42,6 @@ while (process.env[`API_${i}_NAME`]) {
 
 // --- API Router and Middleware ---
 const apiRouter = express.Router();
-
 const verifyToken = (req, res, next) => {
   const token = req.headers["x-access-token"];
   if (!token) {
@@ -137,6 +135,7 @@ apiRouter.get("/sessions", (req, res) => {
     res.json(sessions);
   });
 });
+
 apiRouter.post("/sessions", (req, res) => {
   const newSession = {
     id: `session_${Date.now()}_${req.userId}`,
@@ -152,6 +151,7 @@ apiRouter.post("/sessions", (req, res) => {
     res.status(201).json(newSession);
   });
 });
+
 apiRouter.get("/sessions/:id/messages", (req, res) => {
   const sessionId = req.params.id;
   db.get("SELECT * FROM sessions WHERE id = ? AND user_id = ?", [sessionId, req.userId], (err, session) => {
@@ -175,6 +175,7 @@ apiRouter.get("/sessions/:id/messages", (req, res) => {
     });
   });
 });
+
 apiRouter.post("/sessions/:id/messages", (req, res) => {
   const sessionId = req.params.id;
   const {
@@ -202,6 +203,7 @@ apiRouter.post("/sessions/:id/messages", (req, res) => {
     });
   });
 });
+
 apiRouter.put("/sessions/:id/title", (req, res) => {
   const sessionId = req.params.id;
   const {
@@ -224,12 +226,12 @@ apiRouter.put("/sessions/:id/title", (req, res) => {
   });
 });
 
-// --- New Chat Polling Routes ---
+// --- Chat Polling Routes ---
 apiRouter.post("/chat-request", (req, res) => {
   const taskId = uuidv4();
   taskStorage[taskId] = {
-    thoughts: [],
-    answers: [],
+    fullThought: "",
+    fullAnswer: "",
     done: false,
     error: null
   };
@@ -297,25 +299,19 @@ apiRouter.post("/chat-request", (req, res) => {
             if (data.trim() === "[DONE]") continue;
             try {
               const parsedData = JSON.parse(data);
-              let thoughtChunk = "";
-              let answerChunk = "";
-
+              let thoughtChunk = "",
+                answerChunk = "";
               if (type === "gemini") {
                 answerChunk = parsedData?.candidates?.[0]?.content?.parts?.[0]?.text;
               } else if (type.startsWith("deepseek")) {
                 thoughtChunk = parsedData?.choices?.[0]?.delta?.reasoning_content;
                 answerChunk = parsedData?.choices?.[0]?.delta?.content;
               }
-
               if (taskStorage[taskId]) {
-                if (thoughtChunk) {
-                  taskStorage[taskId].thoughts.push(thoughtChunk);
-                }
-                if (answerChunk) {
-                  taskStorage[taskId].answers.push(answerChunk);
-                }
+                if (thoughtChunk) taskStorage[taskId].fullThought += thoughtChunk;
+                if (answerChunk) taskStorage[taskId].fullAnswer += answerChunk;
               }
-            } catch (e) { /* 忽略解析错误 */ }
+            } catch (e) { /* ignore */ }
           }
         }
       }
@@ -338,35 +334,27 @@ apiRouter.get("/chat-poll/:taskId", (req, res) => {
     taskId
   } = req.params;
   const task = taskStorage[taskId];
-
   if (!task) {
     return res.status(404).json({
       error: "任务不存在或已过期",
-      thoughts: [],
-      answers: [],
+      fullThought: "",
+      fullAnswer: "",
       done: true
     });
   }
-
-  const thoughtsToSend = [...task.thoughts];
-  const answersToSend = [...task.answers];
-  task.thoughts = [];
-  task.answers = [];
-
+  // 每次都返回完整内容，让前端自己判断差异
   res.json({
-    thoughts: thoughtsToSend,
-    answers: answersToSend,
+    fullThought: task.fullThought,
+    fullAnswer: task.fullAnswer,
     done: task.done,
     error: task.error,
   });
 });
 
 app.use("/api", apiRouter);
-
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
-
 app.listen(PORT, () => {
   console.log(`[INFO] 服务器已启动，正在 http://localhost:${PORT} 上运行`);
 });
