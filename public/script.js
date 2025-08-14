@@ -1,4 +1,4 @@
-// public/script.js (Final V11 - Fixed mobile rendering bug)
+// public/script.js (Ultimate Stable Version - All bugs fixed)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -111,10 +111,13 @@ document.addEventListener("DOMContentLoaded", () => {
   logoutBtn.addEventListener("click", function() {
     state.token = null;
     state.username = null;
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("username");
-    localStorage.removeItem("lastActiveSessionId");
+    state.sessions = [];
+    state.currentMessages = [];
+    state.activeSessionId = null;
+    localStorage.clear();
     toggleAuthViews(false);
+    sessionList.innerHTML = "";
+    chatBox.innerHTML = "";
   });
   function toggleAuthViews(isLoggedIn) {
     if (isLoggedIn) {
@@ -148,7 +151,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     if (response.status === 401) {
       logoutBtn.click();
-      return Promise.reject(new Error("登录已过期，请重新登录。"));
+      throw new Error("登录已过期，请重新登录。");
+    }
+    // Handle empty response body for 201 or 204 status codes
+    if (response.status === 201 || response.status === 204) {
+        if (options.method === 'POST' && url.includes('/sessions')) {
+             // For session creation, we expect a body, so let it proceed
+        } else {
+            return {}; // Return empty object for other successful but no-content responses
+        }
     }
     const text = await response.text();
     const data = text ? JSON.parse(text) : {};
@@ -163,9 +174,9 @@ document.addEventListener("DOMContentLoaded", () => {
       renderSessions();
       if (state.sessions.length > 0) {
         const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
-        const activeSession =
-          state.sessions.find((s) => s.id === lastActiveSessionId) || state.sessions[0];
-        await loadSessionMessages(activeSession.id);
+        const sessionExists = state.sessions.some(s => s.id === lastActiveSessionId);
+        const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : state.sessions[0].id;
+        await loadSessionMessages(activeSessionId);
       } else {
         await createNewSession();
       }
@@ -180,7 +191,6 @@ document.addEventListener("DOMContentLoaded", () => {
         method: "POST"
       });
       state.sessions.unshift(newSession);
-      renderSessions(); // Re-render to show the new session
       await loadSessionMessages(newSession.id);
     } catch (error) {
       console.error("创建新对话失败:", error);
@@ -204,6 +214,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   function renderSessions() {
     sessionList.innerHTML = "";
+    if (!state.sessions) return;
     state.sessions.forEach((session) => {
       const listItem = document.createElement("li");
       const titleSpan = document.createElement("span");
@@ -236,37 +247,32 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- 消息渲染 (Message Rendering) ---
   function renderMessages() {
     chatBox.innerHTML = "";
-    if (state.currentMessages) {
-      state.currentMessages.filter((msg) => msg.role !== "system").forEach((msg) => {
-        let content = msg.content;
+    if (!state.currentMessages) return;
+    state.currentMessages.filter((msg) => msg.role !== "system").forEach((msg) => {
+      let content = msg.content;
+      let parsedContent = null;
 
-        // ======================= BUG修复区域 开始 =======================
-        // 尝试将看起来像我们特定格式的 JSON 字符串解析为对象
-        // 移除了导致作用域问题的 IIFE (自执行函数)，解决了移动端渲染bug
-        if (typeof content === "string" && content.startsWith('{"thought"')) {
-          try {
-            const parsed = JSON.parse(content);
-            // 如果解析成功并且是我们期望的对象，就使用它
-            if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
-              content = parsed;
-            }
-          } catch (e) {
-            // 解析失败，则保持其为字符串，不做任何事
+      // ======================= 终极BUG修复区域 开始 =======================
+      // 使用更健壮、无歧义的方式解析JSON
+      if (typeof content === "string" && content.trim().startsWith('{')) {
+        try {
+          // 只有解析成功，并且是包含'answer'键的对象时，才认为是特殊格式
+          const parsed = JSON.parse(content);
+          if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
+            parsedContent = parsed;
           }
+        } catch (e) {
+          // 解析失败，parsedContent 保持为 null
         }
-        // ======================= BUG修复区域 结束 =======================
+      }
+      // ======================= 终极BUG修复区域 结束 =======================
 
-        if (content && typeof content === "object" && content.answer) {
-          renderThinkingMessage(content);
-        } else if (Array.isArray(content)) {
-          // 由于非流式 API 采用单次请求，多回应功能在此版本中被移除
-          // renderMultiResponseMessage(content);
-        } else {
-          renderSimpleMessage(content, msg.role);
-        }
-      });
-    }
-    // 滚动到底部
+      if (parsedContent) {
+        renderThinkingMessage(parsedContent);
+      } else {
+        renderSimpleMessage(content, msg.role);
+      }
+    });
     chatBox.scrollTop = chatBox.scrollHeight;
   }
 
@@ -280,16 +286,11 @@ document.addEventListener("DOMContentLoaded", () => {
     messageDiv.innerHTML = marked.parse(markdownContent);
     chatBox.appendChild(messageDiv);
     chatBox.scrollTop = chatBox.scrollHeight;
-    // 使用 requestAnimationFrame 确保 DOM 更新后再高亮
-    requestAnimationFrame(() => {
-        messageDiv.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightElement(block);
-        });
+    messageDiv.querySelectorAll('pre code').forEach((block) => {
+      hljs.highlightElement(block);
     });
     return messageDiv;
   }
-
-  function renderMultiResponseMessage() {}
 
   function renderThinkingMessage(data) {
     const messageDiv = renderSimpleMessage("", "assistant");
@@ -313,10 +314,8 @@ document.addEventListener("DOMContentLoaded", () => {
       thoughtWrapper.classList.toggle("collapsed");
       header.querySelector(".arrow").classList.toggle("down");
     });
-    requestAnimationFrame(() => {
-        messageDiv.querySelectorAll('pre code').forEach((block) => {
-            hljs.highlightElement(block);
-        });
+    messageDiv.querySelectorAll('pre code').forEach((block) => {
+      hljs.highlightElement(block);
     });
     return messageDiv;
   }
@@ -324,7 +323,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- 聊天与 API 交互 (Chat & API Interaction) ---
   async function loadApiProviders() {
     try {
-      const providers = await apiRequest("/api/providers");
+      // API Provider list is public, so we make a request without a token
+      const providers = await fetch("/api/providers").then(res => res.json());
       state.apiProviders = providers;
       modelSelect.innerHTML = "";
       providers.forEach((provider, index) => {
@@ -352,149 +352,120 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!message || !state.activeSessionId) return;
 
     sendButton.disabled = true;
+    const userMessage = { role: "user", content: message };
+    state.currentMessages.push(userMessage);
+    renderMessages();
     userInput.value = "";
     userInput.focus();
 
-    const userMessage = { role: "user", content: message };
-    state.currentMessages.push(userMessage);
-    renderMessages(); // Render user message immediately
-
-    await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
-      method: "POST",
-      body: JSON.stringify(userMessage),
-    });
-
-    const apiId = modelSelect.value;
-    handleStreamingChat(apiId, message);
+    try {
+        await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
+            method: "POST",
+            body: JSON.stringify(userMessage),
+        });
+        const apiId = modelSelect.value;
+        await handleStreamingChat(apiId, message);
+    } catch (error) {
+        console.error("发送消息或处理回复失败:", error);
+        // Optionally, render an error message in the chat
+    } finally {
+        sendButton.disabled = false;
+    }
   });
 
   async function handleStreamingChat(apiId, userMessage) {
     const startTime = Date.now();
     const assistantMessageDiv = document.createElement("div");
     assistantMessageDiv.className = "message assistant";
-    assistantMessageDiv.innerHTML = `
-      <div class="thinking-header">
-          <span class="timer">思考中...</span>
-          <span class="toggle-thought">
-              <svg class="arrow down" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-          </span>
-      </div>
-      <div class="thought-wrapper">
-          <div class="thought-process" style="display: none;"></div>
-          <div class="final-answer"></div>
-      </div>
-    `;
     chatBox.appendChild(assistantMessageDiv);
-    chatBox.scrollTop = chatBox.scrollHeight;
-
-    const header = assistantMessageDiv.querySelector(".thinking-header");
-    const timer = assistantMessageDiv.querySelector(".timer");
-    const thoughtWrapper = assistantMessageDiv.querySelector(".thought-wrapper");
-    const thoughtProcessDiv = assistantMessageDiv.querySelector(".thought-process");
-    const finalAnswerDiv = assistantMessageDiv.querySelector(".final-answer");
-
-    header.addEventListener("click", () => {
-      thoughtWrapper.classList.toggle("collapsed");
-      header.querySelector(".arrow").classList.toggle("down");
-    });
-
-    const timerInterval = setInterval(() => {
-      timer.textContent = `思考了 ${((Date.now() - startTime) / 1000).toFixed(1)} 秒`;
-    }, 100);
-
+    
     let thoughtContent = "";
     let finalAnswerContent = "";
-    let fullReplyFromDone = "";
 
     try {
-      const response = await fetch("/api/chat-stream", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-access-token": state.token,
-        },
-        body: JSON.stringify({
-          messages: state.currentMessages,
-          apiId: apiId,
-        }),
-      });
-
-      if (!response.ok || !response.body) {
-          const errorText = await response.text();
-          throw new Error(`请求失败: ${response.status} ${errorText}`);
-      }
-      
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const dataBlocks = chunk.split("\n\n");
-
-        for (const block of dataBlocks) {
-          if (block.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(block.substring(6));
-              if (data.error) throw new Error(data.error);
-              if (data.done) {
-                  fullReplyFromDone = data.fullReply;
-                  break; // Exit inner loop
-              }
-              if (data.thought_chunk) {
-                thoughtProcessDiv.style.display = "block";
-                thoughtContent += data.thought_chunk;
-                thoughtProcessDiv.innerHTML = marked.parse(thoughtContent);
-              }
-              if (data.chunk) {
-                finalAnswerContent += data.chunk;
-                finalAnswerDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
-              }
-              chatBox.scrollTop = chatBox.scrollHeight;
-            } catch (e) {
-              console.error("解析流数据块失败:", e, "块内容:", block);
-            }
-          }
-        }
-        if (fullReplyFromDone) break; // Exit outer loop
-      }
-    } catch (error) {
-        finalAnswerDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`;
-    } finally {
-        clearInterval(timerInterval);
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        timer.textContent = `思考了 ${duration} 秒`;
-        
-        const finalContent = fullReplyFromDone || finalAnswerContent;
-        finalAnswerDiv.innerHTML = marked.parse(finalContent); // Remove cursor
-        
-        requestAnimationFrame(() => {
-            assistantMessageDiv.querySelectorAll('pre code').forEach((block) => {
-                hljs.highlightElement(block);
-            });
-        });
-
-        const messageData = {
-          thought: thoughtContent,
-          answer: finalContent,
-          duration: duration,
-        };
-        const finalMessage = {
-          role: "assistant",
-          content: JSON.stringify(messageData),
-        };
-        state.currentMessages.push(finalMessage);
-        await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
+        const response = await fetch("/api/chat-stream", {
             method: "POST",
-            body: JSON.stringify(finalMessage),
+            headers: {
+                "Content-Type": "application/json",
+                "x-access-token": state.token,
+            },
+            body: JSON.stringify({
+                messages: state.currentMessages,
+                apiId: apiId,
+            }),
         });
 
-        await updateSessionTitle(userMessage);
+        if (!response.ok || !response.body) {
+            const errorText = await response.text();
+            throw new Error(`请求失败: ${response.status} ${errorText}`);
+        }
         
-        sendButton.disabled = false;
-        userInput.focus();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const dataBlocks = chunk.split("\n\n");
+
+            for (const block of dataBlocks) {
+                if (!block.startsWith("data: ")) continue;
+                
+                try {
+                    const data = JSON.parse(block.substring(6));
+                    if (data.error) throw new Error(data.error);
+
+                    if (data.done) {
+                        finalAnswerContent = data.fullReply || finalAnswerContent;
+                        // Force exit both loops
+                        return; // Exit the function, finally block will execute
+                    }
+                    if (data.thought_chunk) {
+                        thoughtContent += data.thought_chunk;
+                    }
+                    if (data.chunk) {
+                        finalAnswerContent += data.chunk;
+                    }
+
+                    // Render intermediate state
+                    assistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
+                    chatBox.scrollTop = chatBox.scrollHeight;
+
+                } catch (e) {
+                    console.error("解析流数据块失败:", e, "块内容:", block);
+                }
+            }
+        }
+    } catch (error) {
+        assistantMessageDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`;
+    } finally {
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        const messageData = {
+            thought: thoughtContent,
+            answer: finalAnswerContent,
+            duration: duration,
+        };
+        
+        // Final render using the proper card format
+        renderThinkingMessage(messageData);
+        // The temporary div is now replaced by the final card
+        assistantMessageDiv.remove();
+
+        // Save final message to DB
+        const finalMessage = { role: "assistant", content: JSON.stringify(messageData) };
+        state.currentMessages.push(finalMessage);
+        
+        try {
+            await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
+                method: "POST",
+                body: JSON.stringify(finalMessage),
+            });
+            await updateSessionTitle(userMessage);
+        } catch (error) {
+            console.error("保存最终消息或更新标题失败:", error);
+        }
     }
   }
 
@@ -505,9 +476,7 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         await apiRequest(`/api/sessions/${state.activeSessionId}/title`, {
           method: "PUT",
-          body: JSON.stringify({
-            title: newTitle,
-          }),
+          body: JSON.stringify({ title: newTitle }),
         });
         const sessionToUpdate = state.sessions.find((s) => s.id === state.activeSessionId);
         if (sessionToUpdate) {
@@ -523,7 +492,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- 应用初始化 (App Initialization) ---
   async function initializeApp() {
     if (!state.token) {
-      return toggleAuthViews(false);
+      toggleAuthViews(false);
+      return;
     }
     toggleAuthViews(true);
     await loadApiProviders();
