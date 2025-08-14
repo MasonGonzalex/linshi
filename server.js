@@ -1,510 +1,361 @@
-// public/script.js (Final Stable Version - Polling Implemented)
-document.addEventListener("DOMContentLoaded", () => {
-  // --- 状态管理 (State Management) ---
-  let state = {
-    sessions: [],
-    activeSessionId: null,
-    token: localStorage.getItem("accessToken"),
-    username: localStorage.getItem("username"),
-    isRegisterMode: false,
-    currentMessages: [],
-    apiProviders: [],
+// server.js (终极修复版 V2 - 修正致命错误)
+const express = require("express");
+const fetch = (...args) => import("node-fetch").then(({
+  default: fetch
+}) => fetch(...args));
+const path = require('path'); // <--- 已修正！
+require("dotenv").config();
+const {
+  HttpsProxyAgent
+} = require("https-proxy-agent");
+const db = require("./database.js");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const {
+  v4: uuidv4
+} = require('uuid');
+const app = express();
+
+const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "a-very-strong-secret-key-that-you-should-change";
+const agent = process.env.HTTPS_PROXY ? new HttpsProxyAgent(process.env.HTTPS_PROXY) : null;
+
+// 用于轮询的临时存储
+const taskStorage = {}; // { taskId: { chunks: [], done: false, error: null } }
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+// --- API Provider Configuration ---
+const apiPool = {};
+let i = 1;
+while (process.env[`API_${i}_NAME`]) {
+  const apiId = `api_${i}`;
+  apiPool[apiId] = {
+    id: apiId,
+    name: process.env[`API_${i}_NAME`],
+    type: process.env[`API_${i}_TYPE`],
+    apiKey: process.env[`API_${i}_KEY`],
+    apiUrl: process.env[`API_${i}_URL`],
   };
+  i++;
+}
 
-  // --- DOM 元素选择器 (DOM Element Selectors) ---
-  const appContainer = document.getElementById("app-container");
-  const authContainer = document.getElementById("auth-container");
-  const authForm = document.getElementById("auth-form");
-  const authTitle = document.getElementById("auth-title");
-  const authUsername = document.getElementById("auth-username");
-  const authPassword = document.getElementById("auth-password");
-  const authSubmitBtn = document.getElementById("auth-submit-btn");
-  const switchAuthModeBtn = document.getElementById("switch-auth-mode");
-  const authMessage = document.getElementById("auth-message");
-  const newChatBtn = document.getElementById("new-chat-btn");
-  const sessionList = document.getElementById("session-list");
-  const chatForm = document.getElementById("chat-form");
-  const userInput = document.getElementById("user-input");
-  const chatBox = document.getElementById("chat-box");
-  const modelSelect = document.getElementById("model-select");
-  const usernameDisplay = document.getElementById("username-display");
-  const logoutBtn = document.getElementById("logout-btn");
-  const historyToggleBtn = document.getElementById("history-toggle-btn");
-  const historyDrawer = document.getElementById("history-drawer");
-  const drawerOverlay = document.getElementById("drawer-overlay");
-  const sendButton = chatForm.querySelector("button[type=submit]");
+// --- API Router and Middleware ---
+const apiRouter = express.Router();
 
-  // --- 依赖库配置 (Library Configuration) ---
-  marked.setOptions({
-    highlight: function(code, lang) {
-      const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
-      try {
-        return hljs.highlight(code, {
-          language: language,
-          ignoreIllegals: true
-        }).value;
-      } catch (e) {
-        try {
-          return hljs.highlightAuto(code).value;
-        } catch (e) {
-          return code;
-        }
-      }
-    },
-  });
-
-  // --- 认证相关功能 (Authentication Functions) ---
-  function toggleAuthModeUI() {
-    authMessage.textContent = "";
-    if (state.isRegisterMode) {
-      authTitle.textContent = "注册";
-      authSubmitBtn.textContent = "注册";
-      switchAuthModeBtn.textContent = "已有账号？点击登录";
-    } else {
-      authTitle.textContent = "登录";
-      authSubmitBtn.textContent = "登录";
-      switchAuthModeBtn.textContent = "没有账号？点击注册";
-    }
+const verifyToken = (req, res, next) => {
+  const token = req.headers["x-access-token"];
+  if (!token) {
+    return res.status(403).json({
+      message: "没有提供 Token"
+    });
   }
+  jwt.verify(token, JWT_SECRET, (err, decoded) => {
+    if (err) {
+      return res.status(401).json({
+        message: "Token 无效或已过期"
+      });
+    }
+    req.userId = decoded.id;
+    next();
+  });
+};
 
-  switchAuthModeBtn.addEventListener("click", (event) => {
-    event.preventDefault();
-    state.isRegisterMode = !state.isRegisterMode;
-    toggleAuthModeUI();
+// --- Authentication Routes ---
+apiRouter.post("/auth/register", (req, res) => {
+  const {
+    username,
+    password
+  } = req.body;
+  if (!username || !password || password.length < 6) {
+    return res.status(400).json({
+      message: "用户名或密码格式不正确"
+    });
+  }
+  const hashedPassword = bcrypt.hashSync(password, 8);
+  db.run("INSERT INTO users (username, password) VALUES (?, ?)", [username, hashedPassword], function(err) {
+    if (err) {
+      return res.status(500).json({
+        message: "用户名已存在"
+      });
+    }
+    res.status(201).json({
+      message: "注册成功"
+    });
+  });
+});
+apiRouter.post("/auth/login", (req, res) => {
+  const {
+    username,
+    password
+  } = req.body;
+  db.get("SELECT * FROM users WHERE username = ?", [username], (err, user) => {
+    if (err || !user) {
+      return res.status(404).json({
+        message: "用户不存在"
+      });
+    }
+    if (!bcrypt.compareSync(password, user.password)) {
+      return res.status(401).json({
+        message: "密码错误"
+      });
+    }
+    const token = jwt.sign({
+      id: user.id
+    }, JWT_SECRET, {
+      expiresIn: 2592000
+    });
+    res.status(200).json({
+      id: user.id,
+      username: user.username,
+      accessToken: token
+    });
+  });
+});
+
+// --- API Routes (Public) ---
+apiRouter.get("/providers", (req, res) => {
+  const providers = Object.values(apiPool).map(p => ({
+    id: p.id,
+    name: p.name,
+    type: p.type
+  }));
+  res.json(providers);
+});
+
+// --- API Routes (Protected) ---
+apiRouter.use(verifyToken);
+
+apiRouter.get("/sessions", (req, res) => {
+  db.all("SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC", [req.userId], (err, sessions) => {
+    if (err) {
+      return res.status(500).json({
+        error: err.message
+      });
+    }
+    res.json(sessions);
+  });
+});
+apiRouter.post("/sessions", (req, res) => {
+  const newSession = {
+    id: `session_${Date.now()}_${req.userId}`,
+    user_id: req.userId,
+    title: "新的对话",
+  };
+  db.run("INSERT INTO sessions (id, user_id, title) VALUES (?, ?, ?)", [newSession.id, newSession.user_id, newSession.title], function(err) {
+    if (err) {
+      return res.status(500).json({
+        error: err.message
+      });
+    }
+    res.status(201).json(newSession);
+  });
+});
+apiRouter.get("/sessions/:id/messages", (req, res) => {
+  const sessionId = req.params.id;
+  db.get("SELECT * FROM sessions WHERE id = ? AND user_id = ?", [sessionId, req.userId], (err, session) => {
+    if (err || !session) {
+      return res.status(404).json({
+        error: "对话不存在或无权访问"
+      });
+    }
+    db.all("SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC", [sessionId], (err, messages) => {
+      if (err) {
+        return res.status(500).json({
+          error: err.message
+        });
+      }
+      const systemMessage = {
+        role: "system",
+        content: "你是一个名为“智核”的AI助手。你的核心准则是：提供诚实、有帮助、且无害的回答。你必须始终使用简体中文进行交流，即使是技术术语也要尝试翻译或用中文解释。在任何情况下都不能使用英文或其他语言。",
+      };
+      const formattedMessages = [systemMessage, ...messages];
+      res.json(formattedMessages);
+    });
+  });
+});
+apiRouter.post("/sessions/:id/messages", (req, res) => {
+  const sessionId = req.params.id;
+  const {
+    role,
+    content
+  } = req.body;
+  db.get("SELECT * FROM sessions WHERE id = ? AND user_id = ?", [sessionId, req.userId], (err, session) => {
+    if (err || !session) {
+      return res.status(404).json({
+        error: "对话不存在或无权访问"
+      });
+    }
+    const messageContent = typeof content === "string" ? content : JSON.stringify(content);
+    db.run("INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)", [sessionId, role, messageContent], function(err) {
+      if (err) {
+        return res.status(500).json({
+          error: err.message
+        });
+      }
+      res.status(201).json({
+        id: this.lastID,
+        role,
+        content
+      });
+    });
+  });
+});
+apiRouter.put("/sessions/:id/title", (req, res) => {
+  const sessionId = req.params.id;
+  const {
+    title
+  } = req.body;
+  db.run("UPDATE sessions SET title = ? WHERE id = ? AND user_id = ?", [title, sessionId, req.userId], function(err) {
+    if (err) {
+      return res.status(500).json({
+        error: err.message
+      });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({
+        error: "对话不存在或无权访问"
+      });
+    }
+    res.status(200).json({
+      message: "标题更新成功"
+    });
+  });
+});
+
+// --- New Chat Polling Routes ---
+apiRouter.post("/chat-request", (req, res) => {
+  const taskId = uuidv4();
+  taskStorage[taskId] = {
+    chunks: [],
+    done: false,
+    error: null
+  };
+  res.status(202).json({
+    taskId
   });
 
-  authForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const username = authUsername.value;
-    const password = authPassword.value;
-    // 认证接口路径更新
-    const endpoint = state.isRegisterMode ? "/api/auth/register" : "/api/auth/login";
+  (async () => {
     try {
-      const response = await fetch(endpoint, {
+      const {
+        messages,
+        apiId
+      } = req.body;
+      const provider = apiPool[apiId];
+      if (!provider) throw new Error("无效的 API ID");
+      const {
+        type,
+        apiUrl,
+        apiKey
+      } = provider;
+      let requestUrl, requestBody;
+
+      if (type === "gemini") {
+        requestUrl = `${apiUrl.replace(":generateContent", ":streamGenerateContent")}?key=${apiKey}&alt=sse`;
+        requestBody = JSON.stringify({
+          model: "gemini-2.5-pro",
+          contents: messages.filter(msg => msg.role !== "system").map(msg => ({
+            role: msg.role === "assistant" ? "model" : msg.role,
+            parts: [{
+              text: msg.content
+            }]
+          }))
+        });
+      } else if (type === "deepseek-chat" || type === "deepseek-reasoner") {
+        requestUrl = apiUrl;
+        requestBody = JSON.stringify({
+          model: type,
+          messages: messages,
+          stream: true
+        });
+      } else {
+        throw new Error("该模型类型不支持流式输出");
+      }
+
+      const response = await fetch(requestUrl, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          Authorization: type.startsWith("deepseek") ? `Bearer ${apiKey}` : undefined
         },
-        body: JSON.stringify({
-          username,
-          password
-        }),
+        body: requestBody,
+        agent: agent,
       });
-      const data = await response.json();
+
       if (!response.ok) {
-        throw new Error(data.message || "操作失败");
+        const errorText = await response.text();
+        throw new Error(`API 返回错误: ${errorText}`);
       }
-      if (state.isRegisterMode) {
-        state.isRegisterMode = false;
-        toggleAuthModeUI();
-        authMessage.style.color = "#0E9F6E";
-        authMessage.textContent = "注册成功！请登录。";
-      } else {
-        state.token = data.accessToken;
-        state.username = data.username;
-        localStorage.setItem("accessToken", state.token);
-        localStorage.setItem("username", state.username);
-        initializeApp();
-      }
-    } catch (error) {
-      authMessage.style.color = "#F05252";
-      authMessage.textContent = error.message;
-    }
-  });
 
-  logoutBtn.addEventListener("click", function() {
-    state.token = null;
-    state.username = null;
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("username");
-    localStorage.removeItem("lastActiveSessionId");
-    toggleAuthViews(false);
-  });
-
-  function toggleAuthViews(isLoggedIn) {
-    if (isLoggedIn) {
-      appContainer.classList.remove("hidden");
-      authContainer.classList.add("hidden");
-      usernameDisplay.textContent = state.username;
-    } else {
-      appContainer.classList.add("hidden");
-      authContainer.classList.remove("hidden");
-    }
-  }
-
-  // --- 侧边栏与会话管理 (Sidebar & Session Management) ---
-  historyToggleBtn.addEventListener("click", () => {
-    historyDrawer.classList.toggle("open");
-    drawerOverlay.classList.toggle("visible");
-  });
-
-  drawerOverlay.addEventListener("click", () => {
-    historyDrawer.classList.remove("open");
-    drawerOverlay.classList.remove("visible");
-  });
-
-  async function apiRequest(url, options = {}) {
-    const defaultHeaders = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
-    if (state.token) {
-      defaultHeaders["x-access-token"] = state.token;
-    }
-    const response = await fetch(url, {
-      ...options,
-      headers: defaultHeaders,
-    });
-    if (response.status === 401) {
-      logoutBtn.click();
-      return Promise.reject(new Error("登录已过期，请重新登录。"));
-    }
-    const text = await response.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch (e) {
-      data = {
-        error: "Invalid response from server",
-        _raw: text
-      };
-    }
-    if (!response.ok) {
-      throw new Error(data.message || data.error || "请求失败");
-    }
-    return data;
-  }
-
-  async function loadSessions() {
-    try {
-      const sessions = await apiRequest("/api/sessions");
-      state.sessions = sessions;
-      renderSessions();
-      if (state.sessions && state.sessions.length > 0) {
-        const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
-        const sessionExists = state.sessions.some(s => s.id === lastActiveSessionId);
-        const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : state.sessions[0].id;
-        await loadSessionMessages(activeSessionId);
-      } else {
-        await createNewSession();
-      }
-    } catch (error) {
-      console.error("加载对话列表失败:", error);
-    }
-  }
-
-  async function createNewSession() {
-    try {
-      const newSession = await apiRequest("/api/sessions", {
-        method: "POST"
-      });
-      state.sessions.unshift(newSession);
-      await loadSessionMessages(newSession.id);
-    } catch (error) {
-      console.error("创建新对话失败:", error);
-    }
-  }
-
-  newChatBtn.addEventListener("click", createNewSession);
-
-  async function loadSessionMessages(sessionId) {
-    historyDrawer.classList.remove("open");
-    drawerOverlay.classList.remove("visible");
-    state.activeSessionId = sessionId;
-    localStorage.setItem("lastActiveSessionId", sessionId);
-    renderSessions();
-    try {
-      state.currentMessages = await apiRequest(`/api/sessions/${sessionId}/messages`);
-      renderMessages();
-      userInput.focus();
-    } catch (error) {
-      console.error(`加载对话 [${sessionId}] 失败:`, error);
-      chatBox.innerHTML = `<div class="message assistant" style="color:red">加载消息失败: ${error.message}</div>`;
-    }
-  }
-
-  function renderSessions() {
-    sessionList.innerHTML = "";
-    if (!state.sessions || !Array.isArray(state.sessions)) return;
-    state.sessions.forEach((session) => {
-      const listItem = document.createElement("li");
-      const titleSpan = document.createElement("span");
-      titleSpan.classList.add("session-title");
-      titleSpan.textContent = session.title;
-      const timeSpan = document.createElement("span");
-      timeSpan.classList.add("session-time");
-      const date = new Date(session.created_at);
-      timeSpan.textContent = date
-        .toLocaleString("zh-CN", {
-          timeZone: "Asia/Shanghai",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        })
-        .replace(/\//g, "-");
-      listItem.appendChild(titleSpan);
-      listItem.appendChild(timeSpan);
-      listItem.dataset.sessionId = session.id;
-      if (session.id === state.activeSessionId) {
-        listItem.classList.add("active");
-      }
-      listItem.addEventListener("click", () => loadSessionMessages(session.id));
-      sessionList.appendChild(listItem);
-    });
-  }
-
-  // --- 消息渲染 (Message Rendering) ---
-  function renderMessages() {
-    chatBox.innerHTML = "";
-    if (state.currentMessages) {
-      state.currentMessages
-        .filter((msg) => msg.role !== "system")
-        .forEach((msg) => {
-          let content = msg.content;
-          let parsedContent = null;
-          if (typeof content === "string" && content.trim().startsWith('{')) {
+      for await (const chunk of response.body) {
+        const lines = chunk.toString().split("\n");
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.substring(6);
+            if (data.trim() === "[DONE]") continue;
             try {
-              const parsed = JSON.parse(content);
-              if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
-                parsedContent = parsed;
+              const parsedData = JSON.parse(data);
+              let chunkText = "";
+              if (type === "gemini") {
+                chunkText = parsedData?.candidates?.[0]?.content?.parts?.[0]?.text;
+              } else if (type.startsWith("deepseek")) {
+                chunkText = parsedData?.choices?.[0]?.delta?.content;
               }
-            } catch (e) { /* ignore */ }
+
+              if (chunkText) {
+                if (taskStorage[taskId]) {
+                    taskStorage[taskId].chunks.push(chunkText);
+                }
+              }
+            } catch (e) { /* 忽略解析错误 */ }
           }
-          if (parsedContent) {
-            renderThinkingMessage(parsedContent);
-          } else {
-            renderSimpleMessage(content, msg.role);
-          }
-        });
-    }
-    chatBox.scrollTop = chatBox.scrollHeight;
-  }
-
-  function renderSimpleMessage(content, role) {
-    const messageDiv = document.createElement("div");
-    messageDiv.classList.add("message", role);
-    const markdownContent =
-      typeof content === "object" && content !== null ?
-      "```json\n" + JSON.stringify(content, null, 2) + "\n```" :
-      String(content);
-    messageDiv.innerHTML = marked.parse(markdownContent);
-    chatBox.appendChild(messageDiv);
-    chatBox.scrollTop = chatBox.scrollHeight;
-    messageDiv.querySelectorAll('pre code').forEach((block) => {
-      hljs.highlightElement(block);
-    });
-    return messageDiv;
-  }
-
-  function renderThinkingMessage(data) {
-    const messageDiv = renderSimpleMessage("", "assistant");
-    messageDiv.innerHTML = `
-      <div class="thinking-header">
-          <span>思考了 ${data.duration} 秒</span>
-          <span class="toggle-thought">
-              <svg class="arrow down" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-          </span>
-      </div>
-      <div class="thought-wrapper">
-          <div class="thought-process" style="${data.thought ? "" : "display: none;"}">${marked.parse(
-            data.thought || ""
-          )}</div>
-          <div class="final-answer">${marked.parse(data.answer)}</div>
-      </div>
-    `;
-    const header = messageDiv.querySelector(".thinking-header");
-    const thoughtWrapper = messageDiv.querySelector(".thought-wrapper");
-    header.addEventListener("click", () => {
-      thoughtWrapper.classList.toggle("collapsed");
-      header.querySelector(".arrow").classList.toggle("down");
-    });
-    messageDiv.querySelectorAll('pre code').forEach((block) => {
-      hljs.highlightElement(block);
-    });
-    return messageDiv;
-  }
-
-  // --- 聊天与 API 交互 (Chat & API Interaction) ---
-  async function loadApiProviders() {
-    try {
-      const providers = await apiRequest("/api/providers");
-      state.apiProviders = providers;
-      modelSelect.innerHTML = "";
-      providers.forEach((provider, index) => {
-        const option = document.createElement("option");
-        option.value = provider.id;
-        option.textContent = provider.name;
-        if (index === 0) {
-          option.selected = true;
         }
-        modelSelect.appendChild(option);
-      });
-    } catch (error) {
-      console.error("加载 API 列表失败:", error);
-      modelSelect.innerHTML = "<option>加载失败</option>";
-    }
-  }
-
-  userInput.addEventListener("input", () => {
-    sendButton.disabled = !userInput.value.trim();
-  });
-
-  chatForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const message = userInput.value.trim();
-    if (!message || !state.activeSessionId) return;
-
-    sendButton.disabled = true;
-
-    const userMessage = {
-      role: "user",
-      content: message
-    };
-    state.currentMessages.push(userMessage);
-    renderMessages();
-    userInput.value = "";
-    userInput.focus();
-
-    await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
-      method: "POST",
-      body: JSON.stringify(userMessage),
-    });
-
-    const apiId = modelSelect.value;
-    // 强制使用新的轮询逻辑，不再区分流式或非流式
-    await handleStreamingChat(apiId, message);
-    sendButton.disabled = false;
-  });
-
-  // --- 使用轮询实现伪流式效果 (Polling for Pseudo-Streaming) ---
-  async function handleStreamingChat(apiId, userMessage) {
-    const startTime = Date.now();
-    // 新增：创建一个临时的“思考中...”消息，并立即显示
-    const tempAssistantMessageDiv = renderSimpleMessage("思考中...", "assistant");
-    let finalAnswerContent = "";
-
-    try {
-      // 1. 发送聊天请求到新的 `/api/chat-request` 接口
-      const requestResponse = await apiRequest("/api/chat-request", {
-        method: "POST",
-        body: JSON.stringify({
-          messages: state.currentMessages,
-          apiId: apiId
-        }),
-      });
-
-      if (!requestResponse.taskId) {
-        throw new Error("未能获取有效的任务ID");
       }
-      const {
-        taskId
-      } = requestResponse;
-
-      // 2. 启动轮询，定时查询结果
-      await new Promise((resolve, reject) => {
-        const intervalId = setInterval(async () => {
-          try {
-            // 3. 使用任务ID查询 `/api/chat-poll/:taskId` 接口
-            const pollResponse = await apiRequest(`/api/chat-poll/${taskId}`);
-
-            if (pollResponse.error) {
-              clearInterval(intervalId);
-              reject(new Error(pollResponse.error));
-              return;
-            }
-
-            // 4. 处理增量响应
-            if (pollResponse.chunks && pollResponse.chunks.length > 0) {
-              pollResponse.chunks.forEach(chunk => {
-                finalAnswerContent += chunk;
-              });
-              // 实时更新临时消息的内容
-              tempAssistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
-              chatBox.scrollTop = chatBox.scrollHeight;
-            }
-
-            // 5. 检查是否完成
-            if (pollResponse.done) {
-              clearInterval(intervalId);
-              resolve();
-            }
-          } catch (error) {
-            clearInterval(intervalId);
-            reject(error);
-          }
-        }, 300); // 每 300 毫秒查询一次
-      });
-
     } catch (error) {
-      tempAssistantMessageDiv.innerHTML = `<span style="color: red;">请求处理错误: ${error.message}</span>`;
-      return;
+      console.error(`[后台任务 ${taskId} 失败]:`, error.message);
+      if (taskStorage[taskId]) taskStorage[taskId].error = error.message;
     } finally {
-      // 请求结束后，移除临时消息，渲染最终完整消息
-      tempAssistantMessageDiv.remove();
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      const messageData = {
-        thought: "",
-        answer: finalAnswerContent,
-        duration: duration,
-      };
-      // 使用 `renderThinkingMessage` 函数显示最终结果
-      renderThinkingMessage(messageData);
-
-      const finalMessage = {
-        role: "assistant",
-        content: JSON.stringify(messageData)
-      };
-      state.currentMessages.push(finalMessage);
-
-      try {
-        await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
-          method: "POST",
-          body: JSON.stringify(finalMessage),
-        });
-        await updateSessionTitle(userMessage);
-      } catch (e) {
-        console.error("保存最终消息失败:", e);
+      if (taskStorage[taskId]) {
+        taskStorage[taskId].done = true;
+        setTimeout(() => {
+          delete taskStorage[taskId];
+        }, 300000); // 5分钟后清理任务
       }
     }
+  })();
+});
+
+apiRouter.get("/chat-poll/:taskId", (req, res) => {
+  const {
+    taskId
+  } = req.params;
+  const task = taskStorage[taskId];
+
+  if (!task) {
+    return res.status(404).json({
+      error: "任务不存在或已过期",
+      chunks: [],
+      done: true
+    });
   }
 
-  async function updateSessionTitle(userMessage) {
-    const userMessagesCount = state.currentMessages.filter((msg) => msg.role === "user").length;
-    if (userMessagesCount === 1) {
-      const newTitle = userMessage.substring(0, 20);
-      try {
-        await apiRequest(`/api/sessions/${state.activeSessionId}/title`, {
-          method: "PUT",
-          body: JSON.stringify({
-            title: newTitle
-          }),
-        });
-        const sessionToUpdate = state.sessions.find((s) => s.id === state.activeSessionId);
-        if (sessionToUpdate) {
-          sessionToUpdate.title = newTitle;
-          renderSessions();
-        }
-      } catch (error) {
-        console.error("更新标题失败:", error);
-      }
-    }
-  }
+  const chunksToSend = [...task.chunks];
+  task.chunks = [];
 
-  // --- 应用初始化 (App Initialization) ---
-  async function initializeApp() {
-    state.token = localStorage.getItem("accessToken");
-    state.username = localStorage.getItem("username");
-    toggleAuthViews(!!state.token);
-    await loadApiProviders();
-    if (state.token) {
-      await loadSessions();
-      // 初始化时禁用按钮，防止未加载完成时误点
-      sendButton.disabled = true;
-    }
-  }
+  res.json({
+    chunks: chunksToSend,
+    done: task.done,
+    error: task.error,
+  });
+});
 
-  initializeApp();
+app.use("/api", apiRouter);
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+app.listen(PORT, () => {
+  console.log(`[INFO] 服务器已启动，正在 http://localhost:${PORT} 上运行`);
 });
