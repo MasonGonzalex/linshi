@@ -1,4 +1,4 @@
-// public/script.js (Final Stable Version)
+// public/script.js (Final Stable Version V2 - Corrected Token Handling)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -136,12 +136,19 @@ document.addEventListener("DOMContentLoaded", () => {
     historyDrawer.classList.remove("open");
     drawerOverlay.classList.remove("visible");
   });
+
+  // ======================= 核心修改在这里 =======================
   async function apiRequest(url, options = {}) {
     const defaultHeaders = {
       "Content-Type": "application/json",
-      "x-access-token": state.token,
       ...options.headers,
     };
+    // 只在 token 存在 (非 null, 非 undefined) 的情况下才添加 x-access-token 请求头
+    if (state.token) {
+      defaultHeaders["x-access-token"] = state.token;
+    }
+    // ======================= 修改结束 =======================
+
     const response = await fetch(url, {
       ...options,
       headers: defaultHeaders,
@@ -151,7 +158,15 @@ document.addEventListener("DOMContentLoaded", () => {
       return Promise.reject(new Error("登录已过期，请重新登录。"));
     }
     const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
+    // 增加对空响应体的健壮性处理
+    let data;
+    try {
+        data = text ? JSON.parse(text) : {};
+    } catch (e) {
+        console.error("JSON parsing error:", e);
+        data = { error: "Invalid response from server" };
+    }
+    
     if (!response.ok) {
       throw new Error(data.message || data.error || "请求失败");
     }
@@ -163,15 +178,15 @@ document.addEventListener("DOMContentLoaded", () => {
       renderSessions();
       if (state.sessions.length > 0) {
         const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
-        const activeSession =
-          state.sessions.find((s) => s.id === lastActiveSessionId) || state.sessions[0];
-        await loadSessionMessages(activeSession.id);
+        // 增加判断，确保 lastActiveSessionId 仍然存在于会话列表中
+        const sessionExists = state.sessions.some(s => s.id === lastActiveSessionId);
+        const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : state.sessions[0].id;
+        await loadSessionMessages(activeSessionId);
       } else {
         await createNewSession();
       }
     } catch (error) {
       console.error("加载对话列表失败:", error);
-      alert(error.message);
     }
   }
   async function createNewSession() {
@@ -203,6 +218,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   function renderSessions() {
     sessionList.innerHTML = "";
+    if (!state.sessions || !Array.isArray(state.sessions)) return;
     state.sessions.forEach((session) => {
       const listItem = document.createElement("li");
       const titleSpan = document.createElement("span");
@@ -444,14 +460,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- 应用初始化 (App Initialization) ---
   async function initializeApp() {
-    if (!state.token) {
-      toggleAuthViews(false);
-      return;
+    // 确保在任何操作前先更新 state.token
+    state.token = localStorage.getItem("accessToken");
+    
+    toggleAuthViews(!!state.token);
+    
+    // 只有在登录后才执行需要 token 的操作
+    if (state.token) {
+        await loadApiProviders();
+        await loadSessions();
+        sendButton.disabled = true;
+    } else {
+        // 如果未登录，依然可以尝试加载公共的 providers
+        await loadApiProviders();
     }
-    toggleAuthViews(true);
-    await loadApiProviders();
-    await loadSessions();
-    sendButton.disabled = true;
   }
 
   initializeApp();
