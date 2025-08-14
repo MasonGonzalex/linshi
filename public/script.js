@@ -1,4 +1,4 @@
-// public/script.js (Final Stable Version - All fixes included)
+// public/script.js (Final Stable Version - Polling Implemented, Correctly Formatted)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -136,13 +136,12 @@ document.addEventListener("DOMContentLoaded", () => {
     historyDrawer.classList.remove("open");
     drawerOverlay.classList.remove("visible");
   });
-  
+
   async function apiRequest(url, options = {}) {
     const defaultHeaders = {
       "Content-Type": "application/json",
       ...options.headers,
     };
-    // 只在 token 存在 (非 null, 非 undefined) 的情况下才添加 x-access-token 请求头
     if (state.token) {
       defaultHeaders["x-access-token"] = state.token;
     }
@@ -158,12 +157,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const text = await response.text();
     let data;
     try {
-        data = text ? JSON.parse(text) : {};
+      data = text ? JSON.parse(text) : {};
     } catch (e) {
-        console.error("JSON parsing error:", e, "for response text:", text);
-        data = { error: "Invalid response from server", _raw: text };
+      console.error("JSON parsing error:", e, "for response text:", text);
+      data = {
+        error: "Invalid response from server",
+        _raw: text
+      };
     }
-    
+
     if (!response.ok) {
       throw new Error(data.message || data.error || "请求失败");
     }
@@ -172,7 +174,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function loadSessions() {
     try {
-      state.sessions = await apiRequest("/api/sessions");
+      const sessions = await apiRequest("/api/sessions");
+      state.sessions = sessions;
       renderSessions();
       if (state.sessions && state.sessions.length > 0) {
         const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
@@ -255,12 +258,12 @@ document.addEventListener("DOMContentLoaded", () => {
         let content = msg.content;
         let parsedContent = null;
         if (typeof content === "string" && content.trim().startsWith('{')) {
-            try {
-                const parsed = JSON.parse(content);
-                if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
-                    parsedContent = parsed;
-                }
-            } catch (e) { /* ignore */ }
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
+              parsedContent = parsed;
+            }
+          } catch (e) { /* ignore */ }
         }
         if (parsedContent) {
           renderThinkingMessage(parsedContent);
@@ -345,7 +348,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!message || !state.activeSessionId) return;
 
     sendButton.disabled = true;
-    const userMessage = { role: "user", content: message };
+    const userMessage = {
+      role: "user",
+      content: message
+    };
     state.currentMessages.push(userMessage);
     renderMessages();
     userInput.value = "";
@@ -361,79 +367,87 @@ document.addEventListener("DOMContentLoaded", () => {
     sendButton.disabled = false;
   });
 
+  // --- 使用轮询实现伪流式效果 ---
   async function handleStreamingChat(apiId, userMessage) {
     const startTime = Date.now();
     const tempAssistantMessageDiv = renderSimpleMessage("思考中...", "assistant");
-
-    let thoughtContent = "";
     let finalAnswerContent = "";
-    let fullReplyFromDone = "";
 
     try {
-      const response = await fetch("/api/chat-stream", {
+      const requestResponse = await apiRequest("/api/chat-request", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-access-token": state.token, },
-        body: JSON.stringify({ messages: state.currentMessages, apiId: apiId, }),
+        body: JSON.stringify({
+          messages: state.currentMessages,
+          apiId: apiId
+        }),
       });
 
-      if (!response.ok || !response.body) {
-          const errorText = await response.text();
-          throw new Error(`请求失败: ${response.status} ${errorText}`);
+      if (!requestResponse.taskId) {
+        throw new Error("未能获取有效的任务ID");
       }
-      
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      const {
+        taskId
+      } = requestResponse;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const dataBlocks = chunk.split("\n\n");
+      await new Promise((resolve, reject) => {
+        const intervalId = setInterval(async () => {
+          try {
+            const pollResponse = await apiRequest(`/api/chat-poll/${taskId}`);
 
-        for (const block of dataBlocks) {
-          if (block.startsWith("data: ")) {
-            try {
-              const data = JSON.parse(block.substring(6));
-              if (data.error) throw new Error(data.error);
-              if (data.done) {
-                  fullReplyFromDone = data.fullReply;
-                  break; 
-              }
-              if (data.thought_chunk) {
-                thoughtContent += data.thought_chunk;
-              }
-              if (data.chunk) {
-                finalAnswerContent += data.chunk;
-                tempAssistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
-                chatBox.scrollTop = chatBox.scrollHeight;
-              }
-            } catch (e) { console.error("解析流数据块失败:", e, "块内容:", block); }
+            if (pollResponse.error) {
+              clearInterval(intervalId);
+              reject(new Error(pollResponse.error));
+              return;
+            }
+
+            if (pollResponse.chunks && pollResponse.chunks.length > 0) {
+              pollResponse.chunks.forEach(chunk => {
+                finalAnswerContent += chunk;
+              });
+              tempAssistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
+              chatBox.scrollTop = chatBox.scrollHeight;
+            }
+
+            if (pollResponse.done) {
+              clearInterval(intervalId);
+              resolve();
+            }
+          } catch (error) {
+            clearInterval(intervalId);
+            reject(error);
           }
-        }
-        if (fullReplyFromDone) break;
-      }
+        }, 300); // 每 300 毫秒查询一次
+      });
+
     } catch (error) {
-        tempAssistantMessageDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`;
-        return;
+      tempAssistantMessageDiv.innerHTML = `<span style="color: red;">请求处理错误: ${error.message}</span>`;
+      return;
     } finally {
-        tempAssistantMessageDiv.remove();
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        const finalContent = fullReplyFromDone || finalAnswerContent;
+      tempAssistantMessageDiv.remove();
+      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
-        const messageData = {
-          thought: thoughtContent,
-          answer: finalContent,
-          duration: duration,
-        };
-        renderThinkingMessage(messageData);
+      const messageData = {
+        thought: "",
+        answer: finalAnswerContent,
+        duration: duration,
+      };
+      renderThinkingMessage(messageData);
 
-        const finalMessage = { role: "assistant", content: JSON.stringify(messageData) };
-        state.currentMessages.push(finalMessage);
+      const finalMessage = {
+        role: "assistant",
+        content: JSON.stringify(messageData)
+      };
+      state.currentMessages.push(finalMessage);
+
+      try {
         await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
-            method: "POST",
-            body: JSON.stringify(finalMessage),
+          method: "POST",
+          body: JSON.stringify(finalMessage),
         });
         await updateSessionTitle(userMessage);
+      } catch (e) {
+        console.error("保存最终消息失败:", e);
+      }
     }
   }
 
@@ -444,7 +458,9 @@ document.addEventListener("DOMContentLoaded", () => {
       try {
         await apiRequest(`/api/sessions/${state.activeSessionId}/title`, {
           method: "PUT",
-          body: JSON.stringify({ title: newTitle }),
+          body: JSON.stringify({
+            title: newTitle
+          }),
         });
         const sessionToUpdate = state.sessions.find((s) => s.id === state.activeSessionId);
         if (sessionToUpdate) {
@@ -461,16 +477,16 @@ document.addEventListener("DOMContentLoaded", () => {
   async function initializeApp() {
     state.token = localStorage.getItem("accessToken");
     state.username = localStorage.getItem("username");
-    
+
     toggleAuthViews(!!state.token);
-    
+
     // 无论是否登录，都先加载公共的 providers
     await loadApiProviders();
 
     // 只有在登录后才执行需要 token 的操作
     if (state.token) {
-        await loadSessions();
-        sendButton.disabled = true;
+      await loadSessions();
+      sendButton.disabled = true;
     }
   }
 
