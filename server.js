@@ -1,9 +1,9 @@
-// server.js (终极修复版 V2 - 修正致命错误)
+// server.js (最终功能版 - 支持思考过程)
 const express = require("express");
 const fetch = (...args) => import("node-fetch").then(({
   default: fetch
 }) => fetch(...args));
-const path = require('path'); // <--- 已修正！
+const path = require('path');
 require("dotenv").config();
 const {
   HttpsProxyAgent
@@ -20,8 +20,8 @@ const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "a-very-strong-secret-key-that-you-should-change";
 const agent = process.env.HTTPS_PROXY ? new HttpsProxyAgent(process.env.HTTPS_PROXY) : null;
 
-// 用于轮询的临时存储
-const taskStorage = {}; // { taskId: { chunks: [], done: false, error: null } }
+// 修改：临时存储现在需要区分 thought 和 answer
+const taskStorage = {}; // { taskId: { thoughts: [], answers: [], done: false, error: null } }
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -228,7 +228,8 @@ apiRouter.put("/sessions/:id/title", (req, res) => {
 apiRouter.post("/chat-request", (req, res) => {
   const taskId = uuidv4();
   taskStorage[taskId] = {
-    chunks: [],
+    thoughts: [],
+    answers: [],
     done: false,
     error: null
   };
@@ -296,16 +297,22 @@ apiRouter.post("/chat-request", (req, res) => {
             if (data.trim() === "[DONE]") continue;
             try {
               const parsedData = JSON.parse(data);
-              let chunkText = "";
+              let thoughtChunk = "";
+              let answerChunk = "";
+
               if (type === "gemini") {
-                chunkText = parsedData?.candidates?.[0]?.content?.parts?.[0]?.text;
+                answerChunk = parsedData?.candidates?.[0]?.content?.parts?.[0]?.text;
               } else if (type.startsWith("deepseek")) {
-                chunkText = parsedData?.choices?.[0]?.delta?.content;
+                thoughtChunk = parsedData?.choices?.[0]?.delta?.reasoning_content;
+                answerChunk = parsedData?.choices?.[0]?.delta?.content;
               }
 
-              if (chunkText) {
-                if (taskStorage[taskId]) {
-                    taskStorage[taskId].chunks.push(chunkText);
+              if (taskStorage[taskId]) {
+                if (thoughtChunk) {
+                  taskStorage[taskId].thoughts.push(thoughtChunk);
+                }
+                if (answerChunk) {
+                  taskStorage[taskId].answers.push(answerChunk);
                 }
               }
             } catch (e) { /* 忽略解析错误 */ }
@@ -320,7 +327,7 @@ apiRouter.post("/chat-request", (req, res) => {
         taskStorage[taskId].done = true;
         setTimeout(() => {
           delete taskStorage[taskId];
-        }, 300000); // 5分钟后清理任务
+        }, 300000);
       }
     }
   })();
@@ -335,16 +342,20 @@ apiRouter.get("/chat-poll/:taskId", (req, res) => {
   if (!task) {
     return res.status(404).json({
       error: "任务不存在或已过期",
-      chunks: [],
+      thoughts: [],
+      answers: [],
       done: true
     });
   }
 
-  const chunksToSend = [...task.chunks];
-  task.chunks = [];
+  const thoughtsToSend = [...task.thoughts];
+  const answersToSend = [...task.answers];
+  task.thoughts = [];
+  task.answers = [];
 
   res.json({
-    chunks: chunksToSend,
+    thoughts: thoughtsToSend,
+    answers: answersToSend,
     done: task.done,
     error: task.error,
   });

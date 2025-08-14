@@ -1,4 +1,4 @@
-// public/script.js (Final Stable Version - Polling Implemented, Correctly Formatted)
+// public/script.js (Final Stable Version - Collapsible Thought Process)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -274,6 +274,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     chatBox.scrollTop = chatBox.scrollHeight;
   }
+
   function renderSimpleMessage(content, role) {
     const messageDiv = document.createElement("div");
     messageDiv.classList.add("message", role);
@@ -289,33 +290,46 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     return messageDiv;
   }
+
   function renderThinkingMessage(data) {
-    const messageDiv = renderSimpleMessage("", "assistant");
-    messageDiv.innerHTML = `
+    const messageDiv = document.createElement("div");
+    messageDiv.className = "message assistant";
+
+    const thoughtBlock = data.thought ? `
       <div class="thinking-header">
-          <span class="timer">思考了 ${data.duration} 秒</span>
+          <span class="timer">思考过程</span>
           <span class="toggle-thought">
-              <svg class="arrow down" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </span>
       </div>
-      <div class="thought-wrapper">
-          <div class="thought-process" style="${data.thought ? "" : "display: none;"}">${marked.parse(
-            data.thought || ""
-          )}</div>
-          <div class="final-answer">${marked.parse(data.answer)}</div>
+      <div class="thought-wrapper collapsed">
+          <div class="thought-process">${marked.parse(data.thought)}</div>
       </div>
+    ` : '';
+
+    messageDiv.innerHTML = `
+      ${thoughtBlock}
+      <div class="final-answer">${marked.parse(data.answer)}</div>
     `;
-    const header = messageDiv.querySelector(".thinking-header");
-    const thoughtWrapper = messageDiv.querySelector(".thought-wrapper");
-    header.addEventListener("click", () => {
-      thoughtWrapper.classList.toggle("collapsed");
-      header.querySelector(".arrow").classList.toggle("down");
-    });
+
+    chatBox.appendChild(messageDiv);
+
+    if (data.thought) {
+      const header = messageDiv.querySelector(".thinking-header");
+      const thoughtWrapper = messageDiv.querySelector(".thought-wrapper");
+      header.addEventListener("click", () => {
+        thoughtWrapper.classList.toggle("collapsed");
+        header.querySelector(".arrow").classList.toggle("down");
+      });
+    }
+
     messageDiv.querySelectorAll('pre code').forEach((block) => {
       hljs.highlightElement(block);
     });
+    chatBox.scrollTop = chatBox.scrollHeight;
     return messageDiv;
   }
+
 
   // --- 聊天与 API 交互 (Chat & API Interaction) ---
   async function loadApiProviders() {
@@ -367,10 +381,13 @@ document.addEventListener("DOMContentLoaded", () => {
     sendButton.disabled = false;
   });
 
-  // --- 使用轮询实现伪流式效果 ---
   async function handleStreamingChat(apiId, userMessage) {
     const startTime = Date.now();
-    const tempAssistantMessageDiv = renderSimpleMessage("思考中...", "assistant");
+    const assistantMessageDiv = document.createElement("div");
+    assistantMessageDiv.className = "message assistant";
+    chatBox.appendChild(assistantMessageDiv);
+
+    let thoughtContent = "";
     let finalAnswerContent = "";
 
     try {
@@ -400,11 +417,37 @@ document.addEventListener("DOMContentLoaded", () => {
               return;
             }
 
-            if (pollResponse.chunks && pollResponse.chunks.length > 0) {
-              pollResponse.chunks.forEach(chunk => {
+            let hasNewContent = false;
+            if (pollResponse.thoughts && pollResponse.thoughts.length > 0) {
+              pollResponse.thoughts.forEach(chunk => {
+                thoughtContent += chunk;
+              });
+              hasNewContent = true;
+            }
+            if (pollResponse.answers && pollResponse.answers.length > 0) {
+              pollResponse.answers.forEach(chunk => {
                 finalAnswerContent += chunk;
               });
-              tempAssistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
+              hasNewContent = true;
+            }
+
+            if (hasNewContent) {
+              const thoughtBlock = thoughtContent ? `
+                <div class="thinking-header">
+                    <span class="timer">思考过程</span>
+                    <span class="toggle-thought">
+                        <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </span>
+                </div>
+                <div class="thought-wrapper collapsed">
+                    <div class="thought-process">${marked.parse(thoughtContent + "▋")}</div>
+                </div>` : '';
+              
+              const cursor = pollResponse.done ? "" : "▋";
+              assistantMessageDiv.innerHTML = `
+                ${thoughtBlock}
+                <div class="final-answer">${marked.parse(finalAnswerContent + cursor)}</div>
+              `;
               chatBox.scrollTop = chatBox.scrollHeight;
             }
 
@@ -416,18 +459,18 @@ document.addEventListener("DOMContentLoaded", () => {
             clearInterval(intervalId);
             reject(error);
           }
-        }, 300); // 每 300 毫秒查询一次
+        }, 300);
       });
 
     } catch (error) {
-      tempAssistantMessageDiv.innerHTML = `<span style="color: red;">请求处理错误: ${error.message}</span>`;
+      assistantMessageDiv.innerHTML = `<div class="final-answer"><span style="color: red;">请求处理错误: ${error.message}</span></div>`;
       return;
     } finally {
-      tempAssistantMessageDiv.remove();
+      assistantMessageDiv.remove();
       const duration = ((Date.now() - startTime) / 1000).toFixed(1);
 
       const messageData = {
-        thought: "",
+        thought: thoughtContent,
         answer: finalAnswerContent,
         duration: duration,
       };
@@ -480,10 +523,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     toggleAuthViews(!!state.token);
 
-    // 无论是否登录，都先加载公共的 providers
     await loadApiProviders();
 
-    // 只有在登录后才执行需要 token 的操作
     if (state.token) {
       await loadSessions();
       sendButton.disabled = true;
