@@ -1,9 +1,10 @@
-// public/script.js (Diagnostic Version V4 - Restore Authentication)
+// public/script.js (Diagnostic Version V4.1 - Complete Definitions & Auth Restore)
 
 document.addEventListener("DOMContentLoaded", () => {
-    console.log("诊断脚本 V4 已加载！恢复认证功能...");
+    console.log("诊断脚本 V4.1 已加载！恢复认证功能...");
 
-    // ================== DOM 元素选择器 (保持不变) ==================
+    // ================== 步骤 1: 恢复【所有】的 DOM 元素选择器 ==================
+    // 这是修正问题的关键，确保没有任何变量缺失。
     const appContainer = document.getElementById("app-container");
     const authContainer = document.getElementById("auth-container");
     const authForm = document.getElementById("auth-form");
@@ -13,17 +14,28 @@ document.addEventListener("DOMContentLoaded", () => {
     const authSubmitBtn = document.getElementById("auth-submit-btn");
     const switchAuthModeBtn = document.getElementById("switch-auth-mode");
     const authMessage = document.getElementById("auth-message");
-    // ... (其他选择器保持不变)
+    const newChatBtn = document.getElementById("new-chat-btn");
+    const sessionList = document.getElementById("session-list");
+    const chatForm = document.getElementById("chat-form");
+    const userInput = document.getElementById("user-input");
+    const chatBox = document.getElementById("chat-box");
+    const modelSelect = document.getElementById("model-select");
     const usernameDisplay = document.getElementById("username-display");
+    const logoutBtn = document.getElementById("logout-btn");
+    const historyToggleBtn = document.getElementById("history-toggle-btn");
+    const historyDrawer = document.getElementById("history-drawer");
+    const drawerOverlay = document.getElementById("drawer-overlay");
+    // 注意：这里的 chatForm 可能为 null，如果用户未登录。需要在使用时做判断。
+    const sendButton = chatForm ? chatForm.querySelector("button[type=submit]") : null;
 
-    // ================== 状态变量 (只保留必要的) ==================
+    console.log("所有 DOM 元素已成功选择。");
+    
+    // ================== 步骤 2: 恢复状态变量和认证功能 ==================
     let state = {
         token: localStorage.getItem("accessToken"),
         username: localStorage.getItem("username"),
         isRegisterMode: false,
     };
-    
-    // ================== 步骤 1: 恢复认证相关函数和事件监听 ==================
 
     function toggleAuthModeUI() {
         authMessage.textContent = "";
@@ -38,83 +50,82 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    switchAuthModeBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        state.isRegisterMode = !state.isRegisterMode;
-        toggleAuthModeUI();
-    });
+    // 只有在元素存在时才添加事件监听器
+    if (switchAuthModeBtn) {
+        switchAuthModeBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            state.isRegisterMode = !state.isRegisterMode;
+            toggleAuthModeUI();
+        });
+    }
 
-    authForm.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const username = authUsername.value;
-        const password = authPassword.value;
-        const endpoint = state.isRegisterMode ? "/api/auth/register" : "/api/auth/login";
-        
-        try {
-            const response = await fetch(endpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password }),
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.message || "操作失败");
+    if (authForm) {
+        authForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const username = authUsername.value;
+            const password = authPassword.value;
+            const endpoint = state.isRegisterMode ? "/api/auth/register" : "/api/auth/login";
+            
+            try {
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password }),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.message || "操作失败");
+                }
+                if (state.isRegisterMode) {
+                    state.isRegisterMode = false;
+                    toggleAuthModeUI();
+                    authMessage.style.color = "#0E9F6E";
+                    authMessage.textContent = "注册成功！请登录。";
+                } else {
+                    state.token = data.accessToken;
+                    state.username = data.username;
+                    localStorage.setItem("accessToken", state.token);
+                    localStorage.setItem("username", state.username);
+                    initializeApp(); // 登录成功后，重新初始化界面
+                }
+            } catch (error) {
+                authMessage.style.color = "#F05252";
+                authMessage.textContent = error.message;
             }
-            if (state.isRegisterMode) {
-                state.isRegisterMode = false;
-                toggleAuthModeUI();
-                authMessage.style.color = "#0E9F6E";
-                authMessage.textContent = "注册成功！请登录。";
-            } else {
-                state.token = data.accessToken;
-                state.username = data.username;
-                localStorage.setItem("accessToken", state.token);
-                localStorage.setItem("username", state.username);
-                // 登录成功后，重新调用初始化函数来切换界面
-                initializeApp();
-            }
-        } catch (error) {
-            authMessage.style.color = "#F05252";
-            authMessage.textContent = error.message;
-        }
-    });
+        });
+    }
     
     console.log("认证功能和事件监听已恢复。");
 
-    // ================== 步骤 2: 恢复一个稍微复杂点的初始化函数 ==================
-    
+    // ================== 步骤 3: 恢复UI切换函数和初始化逻辑 ==================
     function toggleAuthViews(isLoggedIn) {
         if (isLoggedIn) {
             appContainer.classList.remove("hidden");
             authContainer.classList.add("hidden");
             usernameDisplay.textContent = state.username;
-            document.title = "【诊断V4成功】已登录，主界面显示";
+            document.title = "【诊断V4.1成功】已登录";
         } else {
             appContainer.classList.add("hidden");
             authContainer.classList.remove("hidden");
-            document.title = "【诊断V4成功】请登录";
+            document.title = "【诊断V4.1成功】请登录";
         }
     }
 
     function initializeApp() {
         console.log("initializeApp 函数被调用。");
-        // 恢复状态变量的读取
         state.token = localStorage.getItem("accessToken");
         state.username = localStorage.getItem("username");
         
-        toggleAuthViews(!!state.token); // 使用 !!state.token 来判断是否已登录
+        toggleAuthViews(!!state.token);
         
-        // 在这一版，我们还不加载API和会话，只测试登录
         if (state.token) {
             console.log("已登录，但暂时不加载会话数据。");
-            // 在这里清空聊天框和会话列表，以防有旧的渲染残留
-            const chatBox = document.getElementById("chat-box");
-            const sessionList = document.getElementById("session-list");
             chatBox.innerHTML = "<p>登录成功！下一步将恢复会话加载功能。</p>";
             sessionList.innerHTML = "";
+            modelSelect.innerHTML = "";
         }
     }
     
-    // ================== 步骤 3: 调用初始化函数 ==================
+    // ================== 步骤 4: 调用初始化函数 ==================
     initializeApp();
 });
