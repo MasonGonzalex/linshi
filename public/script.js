@@ -1,4 +1,4 @@
-// public/script.js (Ultimate Compatibility Version - No async/await in init)
+// public/script.js (Final Stable Version - All fixes included)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -39,9 +39,16 @@ document.addEventListener("DOMContentLoaded", () => {
     highlight: function(code, lang) {
       const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
       try {
-        return hljs.highlight(code, { language: language, ignoreIllegals: true }).value;
+        return hljs.highlight(code, {
+          language: language,
+          ignoreIllegals: true
+        }).value;
       } catch (e) {
-        try { return hljs.highlightAuto(code).value; } catch (e) { return code; }
+        try {
+          return hljs.highlightAuto(code).value;
+        } catch (e) {
+          return code;
+        }
       }
     },
   });
@@ -72,11 +79,18 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          username,
+          password
+        }),
       });
       const data = await response.json();
-      if (!response.ok) { throw new Error(data.message || "操作失败"); }
+      if (!response.ok) {
+        throw new Error(data.message || "操作失败");
+      }
       if (state.isRegisterMode) {
         state.isRegisterMode = false;
         toggleAuthModeUI();
@@ -122,23 +136,70 @@ document.addEventListener("DOMContentLoaded", () => {
     historyDrawer.classList.remove("open");
     drawerOverlay.classList.remove("visible");
   });
-
-  // apiRequest 函数保持 async/await，因为它在聊天提交等后续操作中使用，兼容性问题不大
+  
   async function apiRequest(url, options = {}) {
-    const defaultHeaders = { "Content-Type": "application/json", ...options.headers };
-    if (state.token) { defaultHeaders["x-access-token"] = state.token; }
-    const response = await fetch(url, { ...options, headers: defaultHeaders });
-    if (response.status === 401) { logoutBtn.click(); return Promise.reject(new Error("登录已过期，请重新登录。")); }
+    const defaultHeaders = {
+      "Content-Type": "application/json",
+      ...options.headers,
+    };
+    // 只在 token 存在 (非 null, 非 undefined) 的情况下才添加 x-access-token 请求头
+    if (state.token) {
+      defaultHeaders["x-access-token"] = state.token;
+    }
+
+    const response = await fetch(url, {
+      ...options,
+      headers: defaultHeaders,
+    });
+    if (response.status === 401) {
+      logoutBtn.click();
+      return Promise.reject(new Error("登录已过期，请重新登录。"));
+    }
     const text = await response.text();
     let data;
-    try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { error: "Invalid response from server" }; }
-    if (!response.ok) { throw new Error(data.message || data.error || "请求失败"); }
+    try {
+        data = text ? JSON.parse(text) : {};
+    } catch (e) {
+        console.error("JSON parsing error:", e, "for response text:", text);
+        data = { error: "Invalid response from server", _raw: text };
+    }
+    
+    if (!response.ok) {
+      throw new Error(data.message || data.error || "请求失败");
+    }
     return data;
   }
-  
-  // createNewSession 和 loadSessionMessages 保持 async/await
-  async function createNewSession() { try { const newSession = await apiRequest("/api/sessions", { method: "POST" }); state.sessions.unshift(newSession); await loadSessionMessages(newSession.id); } catch (error) { console.error("创建新对话失败:", error); } }
+
+  async function loadSessions() {
+    try {
+      state.sessions = await apiRequest("/api/sessions");
+      renderSessions();
+      if (state.sessions && state.sessions.length > 0) {
+        const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
+        const sessionExists = state.sessions.some(s => s.id === lastActiveSessionId);
+        const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : state.sessions[0].id;
+        await loadSessionMessages(activeSessionId);
+      } else {
+        await createNewSession();
+      }
+    } catch (error) {
+      console.error("加载对话列表失败:", error);
+    }
+  }
+
+  async function createNewSession() {
+    try {
+      const newSession = await apiRequest("/api/sessions", {
+        method: "POST"
+      });
+      state.sessions.unshift(newSession);
+      await loadSessionMessages(newSession.id);
+    } catch (error) {
+      console.error("创建新对话失败:", error);
+    }
+  }
   newChatBtn.addEventListener("click", createNewSession);
+
   async function loadSessionMessages(sessionId) {
     historyDrawer.classList.remove("open");
     drawerOverlay.classList.remove("visible");
@@ -154,96 +215,261 @@ document.addEventListener("DOMContentLoaded", () => {
       chatBox.innerHTML = `<div class="message assistant" style="color:red">加载消息失败: ${error.message}</div>`;
     }
   }
-
-  // render* 函数保持不变
-  function renderSessions() { sessionList.innerHTML = ""; if (!state.sessions || !Array.isArray(state.sessions)) return; state.sessions.forEach((session) => { const li = document.createElement("li"); const titleSpan = document.createElement("span"); titleSpan.className = "session-title"; titleSpan.textContent = session.title; const timeSpan = document.createElement("span"); timeSpan.className = "session-time"; const date = new Date(session.created_at); timeSpan.textContent = date.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).replace(/\//g, "-"); li.append(titleSpan, timeSpan); li.dataset.sessionId = session.id; if (session.id === state.activeSessionId) { li.classList.add("active"); } li.addEventListener("click", () => loadSessionMessages(session.id)); sessionList.appendChild(li); }); }
-  function renderMessages() { chatBox.innerHTML = ""; if (state.currentMessages) { state.currentMessages.filter((msg) => msg.role !== "system").forEach((msg) => { let content = msg.content; let parsedContent = null; if (typeof content === "string" && content.trim().startsWith('{')) { try { const parsed = JSON.parse(content); if (parsed && typeof parsed === 'object' && 'answer' in parsed) { parsedContent = parsed; } } catch (e) { /* ignore */ } } if (parsedContent) { renderThinkingMessage(parsedContent); } else { renderSimpleMessage(content, msg.role); } }); } chatBox.scrollTop = chatBox.scrollHeight; }
-  function renderSimpleMessage(content, role) { const div = document.createElement("div"); div.classList.add("message", role); const markdownContent = typeof content === "object" && content !== null ? JSON.stringify(content, null, 2) : String(content); div.innerHTML = marked.parse(markdownContent); chatBox.appendChild(div); chatBox.scrollTop = chatBox.scrollHeight; div.querySelectorAll('pre code').forEach((block) => { hljs.highlightElement(block); }); return div; }
-  function renderThinkingMessage(data) { const div = renderSimpleMessage("", "assistant"); div.innerHTML = `<div class="thinking-header"><span>思考了 ${data.duration} 秒</span><span class="toggle-thought"><svg class="arrow down" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></span></div><div class="thought-wrapper"><div class="thought-process" style="${data.thought ? "" : "display: none;"}">${marked.parse(data.thought || "")}</div><div class="final-answer">${marked.parse(data.answer)}</div></div>`; const header = div.querySelector(".thinking-header"); const wrapper = div.querySelector(".thought-wrapper"); header.addEventListener("click", () => { wrapper.classList.toggle("collapsed"); header.querySelector(".arrow").classList.toggle("down"); }); div.querySelectorAll('pre code').forEach((block) => { hljs.highlightElement(block); }); return div; }
-
-  // 聊天提交逻辑保持不变
-  userInput.addEventListener("input", () => { sendButton.disabled = !userInput.value.trim(); });
-  chatForm.addEventListener("submit", async (event) => { event.preventDefault(); const message = userInput.value.trim(); if (!message || !state.activeSessionId) return; sendButton.disabled = true; const userMessage = { role: "user", content: message }; state.currentMessages.push(userMessage); renderMessages(); userInput.value = ""; userInput.focus(); await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, { method: "POST", body: JSON.stringify(userMessage), }); const apiId = modelSelect.value; await handleStreamingChat(apiId, message); sendButton.disabled = false; });
-  async function handleStreamingChat(apiId, userMessage) { const startTime = Date.now(); const tempDiv = renderSimpleMessage("思考中...", "assistant"); let thoughtContent = "", finalAnswerContent = "", fullReplyFromDone = ""; try { const response = await fetch("/api/chat-stream", { method: "POST", headers: { "Content-Type": "application/json", "x-access-token": state.token, }, body: JSON.stringify({ messages: state.currentMessages, apiId: apiId, }), }); if (!response.ok || !response.body) { const errorText = await response.text(); throw new Error(`请求失败: ${response.status} ${errorText}`); } const reader = response.body.getReader(); const decoder = new TextDecoder(); while (true) { const { done, value } = await reader.read(); if (done) break; const chunk = decoder.decode(value, { stream: true }); const dataBlocks = chunk.split("\n\n"); for (const block of dataBlocks) { if (block.startsWith("data: ")) { try { const data = JSON.parse(block.substring(6)); if (data.error) throw new Error(data.error); if (data.done) { fullReplyFromDone = data.fullReply; break; } if (data.thought_chunk) { thoughtContent += data.thought_chunk; } if (data.chunk) { finalAnswerContent += data.chunk; tempDiv.innerHTML = marked.parse(finalAnswerContent + "▋"); chatBox.scrollTop = chatBox.scrollHeight; } } catch (e) { console.error("解析流数据块失败:", e, "块内容:", block); } } } if (fullReplyFromDone) break; } } catch (error) { tempDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`; return; } finally { tempDiv.remove(); const duration = ((Date.now() - startTime) / 1000).toFixed(1); const finalContent = fullReplyFromDone || finalAnswerContent; const messageData = { thought: thoughtContent, answer: finalContent, duration: duration, }; renderThinkingMessage(messageData); const finalMessage = { role: "assistant", content: JSON.stringify(messageData) }; state.currentMessages.push(finalMessage); await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, { method: "POST", body: JSON.stringify(finalMessage), }); await updateSessionTitle(userMessage); } }
-  async function updateSessionTitle(userMessage) { const userMessagesCount = state.currentMessages.filter((msg) => msg.role === "user").length; if (userMessagesCount === 1) { const newTitle = userMessage.substring(0, 20); try { await apiRequest(`/api/sessions/${state.activeSessionId}/title`, { method: "PUT", body: JSON.stringify({ title: newTitle }), }); const sessionToUpdate = state.sessions.find((s) => s.id === state.activeSessionId); if (sessionToUpdate) { sessionToUpdate.title = newTitle; renderSessions(); } } catch (error) { console.error("更新标题失败:", error); } } }
-
-  // ======================= 核心修改在这里 =======================
-  // --- 聊天与 API 交互 (使用原始 then/catch 语法) ---
-
-  function loadApiProviders() {
-    console.log("正在加载 API Providers (使用 then/catch)...");
-    fetch("/api/providers")
-      .then(response => {
-        if (!response.ok) {
-          throw new Error('网络响应错误');
-        }
-        return response.json();
-      })
-      .then(providers => {
-        console.log("成功获取 API Providers:", providers);
-        state.apiProviders = providers;
-        modelSelect.innerHTML = "";
-        providers.forEach((provider, index) => {
-          const option = document.createElement("option");
-          option.value = provider.id;
-          option.textContent = provider.name;
-          if (index === 0) {
-            option.selected = true;
-          }
-          modelSelect.appendChild(option);
-        });
-      })
-      .catch(error => {
-        console.error("加载 API 列表失败:", error);
-        modelSelect.innerHTML = "<option>加载失败</option>";
-      });
+  function renderSessions() {
+    sessionList.innerHTML = "";
+    if (!state.sessions || !Array.isArray(state.sessions)) return;
+    state.sessions.forEach((session) => {
+      const listItem = document.createElement("li");
+      const titleSpan = document.createElement("span");
+      titleSpan.classList.add("session-title");
+      titleSpan.textContent = session.title;
+      const timeSpan = document.createElement("span");
+      timeSpan.classList.add("session-time");
+      const date = new Date(session.created_at);
+      timeSpan.textContent = date
+        .toLocaleString("zh-CN", {
+          timeZone: "Asia/Shanghai",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
+        .replace(/\//g, "-");
+      listItem.appendChild(titleSpan);
+      listItem.appendChild(timeSpan);
+      listItem.dataset.sessionId = session.id;
+      if (session.id === state.activeSessionId) {
+        listItem.classList.add("active");
+      }
+      listItem.addEventListener("click", () => loadSessionMessages(session.id));
+      sessionList.appendChild(listItem);
+    });
   }
 
-  function loadSessions() {
-    console.log("正在加载 Sessions (使用 then/catch)...");
-    const headers = { "Content-Type": "application/json" };
-    if (state.token) {
-      headers["x-access-token"] = state.token;
-    }
-
-    fetch("/api/sessions", { headers: headers })
-      .then(response => {
-        if (response.status === 401) { logoutBtn.click(); throw new Error("登录已过期"); }
-        if (!response.ok) { throw new Error('网络响应错误'); }
-        return response.json();
-      })
-      .then(sessions => {
-        console.log("成功获取 Sessions:", sessions);
-        state.sessions = sessions;
-        renderSessions();
-        if (sessions.length > 0) {
-          const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
-          const sessionExists = sessions.some(s => s.id === lastActiveSessionId);
-          const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : sessions[0].id;
-          loadSessionMessages(activeSessionId);
-        } else {
-          createNewSession(); // 这个函数内部还是 async/await，但它是在用户操作后触发，通常没问题
+  // --- 消息渲染 (Message Rendering) ---
+  function renderMessages() {
+    chatBox.innerHTML = "";
+    if (state.currentMessages) {
+      state.currentMessages.filter((msg) => msg.role !== "system").forEach((msg) => {
+        let content = msg.content;
+        let parsedContent = null;
+        if (typeof content === "string" && content.trim().startsWith('{')) {
+            try {
+                const parsed = JSON.parse(content);
+                if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
+                    parsedContent = parsed;
+                }
+            } catch (e) { /* ignore */ }
         }
-      })
-      .catch(error => {
-        console.error("加载对话列表失败:", error);
+        if (parsedContent) {
+          renderThinkingMessage(parsedContent);
+        } else {
+          renderSimpleMessage(content, msg.role);
+        }
       });
+    }
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+  function renderSimpleMessage(content, role) {
+    const messageDiv = document.createElement("div");
+    messageDiv.classList.add("message", role);
+    const markdownContent =
+      typeof content === "object" && content !== null ?
+      "```json\n" + JSON.stringify(content, null, 2) + "\n```" :
+      String(content);
+    messageDiv.innerHTML = marked.parse(markdownContent);
+    chatBox.appendChild(messageDiv);
+    chatBox.scrollTop = chatBox.scrollHeight;
+    messageDiv.querySelectorAll('pre code').forEach((block) => {
+      hljs.highlightElement(block);
+    });
+    return messageDiv;
+  }
+  function renderThinkingMessage(data) {
+    const messageDiv = renderSimpleMessage("", "assistant");
+    messageDiv.innerHTML = `
+      <div class="thinking-header">
+          <span class="timer">思考了 ${data.duration} 秒</span>
+          <span class="toggle-thought">
+              <svg class="arrow down" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          </span>
+      </div>
+      <div class="thought-wrapper">
+          <div class="thought-process" style="${data.thought ? "" : "display: none;"}">${marked.parse(
+            data.thought || ""
+          )}</div>
+          <div class="final-answer">${marked.parse(data.answer)}</div>
+      </div>
+    `;
+    const header = messageDiv.querySelector(".thinking-header");
+    const thoughtWrapper = messageDiv.querySelector(".thought-wrapper");
+    header.addEventListener("click", () => {
+      thoughtWrapper.classList.toggle("collapsed");
+      header.querySelector(".arrow").classList.toggle("down");
+    });
+    messageDiv.querySelectorAll('pre code').forEach((block) => {
+      hljs.highlightElement(block);
+    });
+    return messageDiv;
+  }
+
+  // --- 聊天与 API 交互 (Chat & API Interaction) ---
+  async function loadApiProviders() {
+    try {
+      const providers = await apiRequest("/api/providers");
+      state.apiProviders = providers;
+      modelSelect.innerHTML = "";
+      providers.forEach((provider, index) => {
+        const option = document.createElement("option");
+        option.value = provider.id;
+        option.textContent = provider.name;
+        if (index === 0) {
+          option.selected = true;
+        }
+        modelSelect.appendChild(option);
+      });
+    } catch (error) {
+      console.error("加载 API 列表失败:", error);
+      modelSelect.innerHTML = "<option>加载失败</option>";
+    }
+  }
+
+  userInput.addEventListener("input", () => {
+    sendButton.disabled = !userInput.value.trim();
+  });
+
+  chatForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const message = userInput.value.trim();
+    if (!message || !state.activeSessionId) return;
+
+    sendButton.disabled = true;
+    const userMessage = { role: "user", content: message };
+    state.currentMessages.push(userMessage);
+    renderMessages();
+    userInput.value = "";
+    userInput.focus();
+
+    await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(userMessage),
+    });
+
+    const apiId = modelSelect.value;
+    await handleStreamingChat(apiId, message);
+    sendButton.disabled = false;
+  });
+
+  async function handleStreamingChat(apiId, userMessage) {
+    const startTime = Date.now();
+    const tempAssistantMessageDiv = renderSimpleMessage("思考中...", "assistant");
+
+    let thoughtContent = "";
+    let finalAnswerContent = "";
+    let fullReplyFromDone = "";
+
+    try {
+      const response = await fetch("/api/chat-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-access-token": state.token, },
+        body: JSON.stringify({ messages: state.currentMessages, apiId: apiId, }),
+      });
+
+      if (!response.ok || !response.body) {
+          const errorText = await response.text();
+          throw new Error(`请求失败: ${response.status} ${errorText}`);
+      }
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const dataBlocks = chunk.split("\n\n");
+
+        for (const block of dataBlocks) {
+          if (block.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(block.substring(6));
+              if (data.error) throw new Error(data.error);
+              if (data.done) {
+                  fullReplyFromDone = data.fullReply;
+                  break; 
+              }
+              if (data.thought_chunk) {
+                thoughtContent += data.thought_chunk;
+              }
+              if (data.chunk) {
+                finalAnswerContent += data.chunk;
+                tempAssistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
+                chatBox.scrollTop = chatBox.scrollHeight;
+              }
+            } catch (e) { console.error("解析流数据块失败:", e, "块内容:", block); }
+          }
+        }
+        if (fullReplyFromDone) break;
+      }
+    } catch (error) {
+        tempAssistantMessageDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`;
+        return;
+    } finally {
+        tempAssistantMessageDiv.remove();
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        const finalContent = fullReplyFromDone || finalAnswerContent;
+
+        const messageData = {
+          thought: thoughtContent,
+          answer: finalContent,
+          duration: duration,
+        };
+        renderThinkingMessage(messageData);
+
+        const finalMessage = { role: "assistant", content: JSON.stringify(messageData) };
+        state.currentMessages.push(finalMessage);
+        await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
+            method: "POST",
+            body: JSON.stringify(finalMessage),
+        });
+        await updateSessionTitle(userMessage);
+    }
+  }
+
+  async function updateSessionTitle(userMessage) {
+    const userMessagesCount = state.currentMessages.filter((msg) => msg.role === "user").length;
+    if (userMessagesCount === 1) {
+      const newTitle = userMessage.substring(0, 20);
+      try {
+        await apiRequest(`/api/sessions/${state.activeSessionId}/title`, {
+          method: "PUT",
+          body: JSON.stringify({ title: newTitle }),
+        });
+        const sessionToUpdate = state.sessions.find((s) => s.id === state.activeSessionId);
+        if (sessionToUpdate) {
+          sessionToUpdate.title = newTitle;
+          renderSessions();
+        }
+      } catch (error) {
+        console.error("更新标题失败:", error);
+      }
+    }
   }
 
   // --- 应用初始化 (App Initialization) ---
-  function initializeApp() {
-    console.log("正在初始化应用...");
+  async function initializeApp() {
     state.token = localStorage.getItem("accessToken");
     state.username = localStorage.getItem("username");
     
     toggleAuthViews(!!state.token);
     
     // 无论是否登录，都先加载公共的 providers
-    loadApiProviders();
+    await loadApiProviders();
 
     // 只有在登录后才执行需要 token 的操作
     if (state.token) {
-        loadSessions();
+        await loadSessions();
         sendButton.disabled = true;
     }
   }

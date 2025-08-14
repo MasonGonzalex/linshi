@@ -1,4 +1,4 @@
-// server.js (终极修复版)
+// server.js (最终功能版 - 路由已修复)
 const express = require("express");
 const fetch = (...args) => import("node-fetch").then(({
   default: fetch
@@ -19,11 +19,8 @@ const agent = process.env.HTTPS_PROXY ? new HttpsProxyAgent(process.env.HTTPS_PR
 
 app.use(express.json());
 
-// ======================= 核心修改在这里 =======================
-// 将静态文件服务中间件移到所有路由的最前面
-// 这样对 /style.css, /script.js 的请求会先在这里被正确处理
+// 静态文件服务中间件在所有路由的最前面，确保 CSS 和 JS 文件能被正确加载
 app.use(express.static(path.join(__dirname, "public")));
-// ======================= 修改结束 =======================
 
 
 // --- API Provider Configuration ---
@@ -338,8 +335,7 @@ apiRouter.post("/chat-stream", async (req, res) => {
 
 app.use("/api", apiRouter);
 
-// --- Serve Frontend ---
-// 这个通配符路由现在在静态文件服务之后，是安全的
+// 这个通配符路由在静态文件服务之后，是安全的
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
