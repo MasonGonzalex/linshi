@@ -1,4 +1,4 @@
-// public/script.js (Ultimate Stable Version - All bugs fixed)
+// public/script.js (Ultimate Stable Version V2 - All bugs fixed, robust networking)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -139,40 +139,49 @@ document.addEventListener("DOMContentLoaded", () => {
     historyDrawer.classList.remove("open");
     drawerOverlay.classList.remove("visible");
   });
+
+  // ======================= 终极BUG修复区域 1: 加固网络请求函数 =======================
   async function apiRequest(url, options = {}) {
     const defaultHeaders = {
       "Content-Type": "application/json",
-      "x-access-token": state.token,
       ...options.headers,
     };
-    const response = await fetch(url, {
-      ...options,
-      headers: defaultHeaders,
-    });
+    if (state.token) {
+        defaultHeaders['x-access-token'] = state.token;
+    }
+
+    const response = await fetch(url, { ...options, headers: defaultHeaders });
+
     if (response.status === 401) {
       logoutBtn.click();
       throw new Error("登录已过期，请重新登录。");
     }
-    // Handle empty response body for 201 or 204 status codes
-    if (response.status === 201 || response.status === 204) {
-        if (options.method === 'POST' && url.includes('/sessions')) {
-             // For session creation, we expect a body, so let it proceed
-        } else {
-            return {}; // Return empty object for other successful but no-content responses
-        }
+    
+    // 优雅地处理可能为空的响应体
+    const responseText = await response.text();
+    let data;
+    try {
+        data = responseText ? JSON.parse(responseText) : {};
+    } catch(e) {
+        // 如果解析失败，但请求是成功的，可能是一个非JSON的成功响应
+        if(response.ok) return { _raw: responseText }; // 返回原始文本
+        // 如果解析失败且请求也失败了，抛出网络错误
+        throw new Error(`网络请求失败，状态码: ${response.status}`);
     }
-    const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
+
     if (!response.ok) {
-      throw new Error(data.message || data.error || "请求失败");
+      throw new Error(data.message || data.error || `请求失败: ${response.status}`);
     }
+
     return data;
   }
+  // ======================= 修复结束 =======================
+
   async function loadSessions() {
     try {
       state.sessions = await apiRequest("/api/sessions");
       renderSessions();
-      if (state.sessions.length > 0) {
+      if (state.sessions && state.sessions.length > 0) {
         const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
         const sessionExists = state.sessions.some(s => s.id === lastActiveSessionId);
         const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : state.sessions[0].id;
@@ -182,7 +191,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (error) {
       console.error("加载对话列表失败:", error);
-      alert(error.message);
+      // alert(error.message); // Commented out to avoid annoying popups
     }
   }
   async function createNewSession() {
@@ -214,7 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   function renderSessions() {
     sessionList.innerHTML = "";
-    if (!state.sessions) return;
+    if (!state.sessions || !Array.isArray(state.sessions)) return;
     state.sessions.forEach((session) => {
       const listItem = document.createElement("li");
       const titleSpan = document.createElement("span");
@@ -247,26 +256,18 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- 消息渲染 (Message Rendering) ---
   function renderMessages() {
     chatBox.innerHTML = "";
-    if (!state.currentMessages) return;
+    if (!state.currentMessages || !Array.isArray(state.currentMessages)) return;
     state.currentMessages.filter((msg) => msg.role !== "system").forEach((msg) => {
       let content = msg.content;
       let parsedContent = null;
-
-      // ======================= 终极BUG修复区域 开始 =======================
-      // 使用更健壮、无歧义的方式解析JSON
       if (typeof content === "string" && content.trim().startsWith('{')) {
         try {
-          // 只有解析成功，并且是包含'answer'键的对象时，才认为是特殊格式
           const parsed = JSON.parse(content);
           if (parsed && typeof parsed === 'object' && 'answer' in parsed) {
             parsedContent = parsed;
           }
-        } catch (e) {
-          // 解析失败，parsedContent 保持为 null
-        }
+        } catch (e) { /* ignore parse error */ }
       }
-      // ======================= 终极BUG修复区域 结束 =======================
-
       if (parsedContent) {
         renderThinkingMessage(parsedContent);
       } else {
@@ -282,7 +283,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const markdownContent =
       typeof content === "object" && content !== null ?
       "```json\n" + JSON.stringify(content, null, 2) + "\n```" :
-      String(content);
+      String(content || ''); // Ensure content is a string
     messageDiv.innerHTML = marked.parse(markdownContent);
     chatBox.appendChild(messageDiv);
     chatBox.scrollTop = chatBox.scrollHeight;
@@ -293,7 +294,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function renderThinkingMessage(data) {
-    const messageDiv = renderSimpleMessage("", "assistant");
+    const messageDiv = document.createElement("div");
+    messageDiv.className = "message assistant";
     messageDiv.innerHTML = `
       <div class="thinking-header">
           <span class="timer">思考了 ${data.duration} 秒</span>
@@ -305,9 +307,11 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="thought-process" style="${data.thought ? "" : "display: none;"}">${marked.parse(
             data.thought || ""
           )}</div>
-          <div class="final-answer">${marked.parse(data.answer)}</div>
+          <div class="final-answer">${marked.parse(data.answer || '')}</div>
       </div>
     `;
+    chatBox.appendChild(messageDiv);
+
     const header = messageDiv.querySelector(".thinking-header");
     const thoughtWrapper = messageDiv.querySelector(".thought-wrapper");
     header.addEventListener("click", () => {
@@ -321,10 +325,10 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- 聊天与 API 交互 (Chat & API Interaction) ---
+  // ======================= 终极BUG修复区域 2: 统一使用apiRequest =======================
   async function loadApiProviders() {
     try {
-      // API Provider list is public, so we make a request without a token
-      const providers = await fetch("/api/providers").then(res => res.json());
+      const providers = await apiRequest("/api/providers"); // 使用封装好的函数
       state.apiProviders = providers;
       modelSelect.innerHTML = "";
       providers.forEach((provider, index) => {
@@ -341,6 +345,7 @@ document.addEventListener("DOMContentLoaded", () => {
       modelSelect.innerHTML = "<option>加载失败</option>";
     }
   }
+  // ======================= 修复结束 =======================
 
   userInput.addEventListener("input", () => {
     sendButton.disabled = !userInput.value.trim();
@@ -367,7 +372,6 @@ document.addEventListener("DOMContentLoaded", () => {
         await handleStreamingChat(apiId, message);
     } catch (error) {
         console.error("发送消息或处理回复失败:", error);
-        // Optionally, render an error message in the chat
     } finally {
         sendButton.disabled = false;
     }
@@ -375,9 +379,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function handleStreamingChat(apiId, userMessage) {
     const startTime = Date.now();
-    const assistantMessageDiv = document.createElement("div");
-    assistantMessageDiv.className = "message assistant";
-    chatBox.appendChild(assistantMessageDiv);
+    const tempAssistantMessageDiv = renderSimpleMessage("思考中...", "assistant");
     
     let thoughtContent = "";
     let finalAnswerContent = "";
@@ -402,10 +404,14 @@ document.addEventListener("DOMContentLoaded", () => {
         
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-
-        while (true) {
+        
+        let doneReading = false;
+        while (!doneReading) {
             const { done, value } = await reader.read();
-            if (done) break;
+            if (done) {
+                doneReading = true;
+                break;
+            }
 
             const chunk = decoder.decode(value, { stream: true });
             const dataBlocks = chunk.split("\n\n");
@@ -419,18 +425,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
                     if (data.done) {
                         finalAnswerContent = data.fullReply || finalAnswerContent;
-                        // Force exit both loops
-                        return; // Exit the function, finally block will execute
+                        doneReading = true;
+                        break;
                     }
-                    if (data.thought_chunk) {
-                        thoughtContent += data.thought_chunk;
-                    }
-                    if (data.chunk) {
-                        finalAnswerContent += data.chunk;
-                    }
-
-                    // Render intermediate state
-                    assistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
+                    if (data.thought_chunk) thoughtContent += data.thought_chunk;
+                    if (data.chunk) finalAnswerContent += data.chunk;
+                    
+                    tempAssistantMessageDiv.innerHTML = marked.parse(finalAnswerContent + "▋");
                     chatBox.scrollTop = chatBox.scrollHeight;
 
                 } catch (e) {
@@ -439,28 +440,23 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
     } catch (error) {
-        assistantMessageDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`;
+        tempAssistantMessageDiv.innerHTML = `<span style="color: red;">流式请求错误: ${error.message}</span>`;
+        return; // Exit early on error
     } finally {
-        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-        const messageData = {
-            thought: thoughtContent,
-            answer: finalAnswerContent,
-            duration: duration,
-        };
-        
-        // Final render using the proper card format
-        renderThinkingMessage(messageData);
-        // The temporary div is now replaced by the final card
-        assistantMessageDiv.remove();
+        tempAssistantMessageDiv.remove(); // Remove the temporary message
 
-        // Save final message to DB
+        const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+        const messageData = { thought: thoughtContent, answer: finalAnswerContent, duration: duration };
+        
+        renderThinkingMessage(messageData); // Render the final card
+        chatBox.scrollTop = chatBox.scrollHeight;
+
         const finalMessage = { role: "assistant", content: JSON.stringify(messageData) };
         state.currentMessages.push(finalMessage);
         
         try {
             await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
-                method: "POST",
-                body: JSON.stringify(finalMessage),
+                method: "POST", body: JSON.stringify(finalMessage),
             });
             await updateSessionTitle(userMessage);
         } catch (error) {
@@ -498,7 +494,8 @@ document.addEventListener("DOMContentLoaded", () => {
     toggleAuthViews(true);
     await loadApiProviders();
     await loadSessions();
-    sendButton.disabled = true; // Initial state
+    userInput.value = '';
+    sendButton.disabled = true;
   }
 
   initializeApp();
