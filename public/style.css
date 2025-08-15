@@ -1,5 +1,5 @@
 /* =================================================================== */
-/* ==           style.css (最终毕业版 - 精致浅色主题)            == */
+/* ==   style.css (iOS 14.4 兼容版 - 增强读秒和思考过程功能)     == */
 /* =================================================================== */
 
 /* --- 1. 字体与全局设置 --- */
@@ -13,10 +13,12 @@
     --text-primary: #1F2937; /* 主要文本 - 深灰色 */
     --text-secondary: #6B7280; /* 次要文本 - 中灰色 */
     --text-thought: #9CA3AF; /* 思考过程 - 浅灰色 */
-    --accent-color: #0E9F6E; /* 强调色 - 精致的绿色 (替代之前的青色，在白色背景上更突出) */
+    --text-timer: #059669; /* 计时器颜色 - 绿色 */
+    --accent-color: #0E9F6E; /* 强调色 - 精致的绿色 */
     --border-color: #E5E7EB; /* 边框颜色 */
     --hover-bg: #E5E7EB; /* 悬停背景色 */
     --border-radius: 8px; /* 统一圆角 */
+    --thinking-bg: #F8FAFC; /* 思考过程背景色 */
 }
 
 body {
@@ -42,7 +44,6 @@ body {
 #new-chat-btn:hover { background-color: var(--hover-bg); }
 #session-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1; }
 #session-list li { padding: 12px 16px; margin-bottom: 4px; border-radius: var(--border-radius); cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background-color 0.2s; }
-/* 使用 margin 替代 gap 属性，以兼容旧版 Safari */
 #session-list li > *:not(:last-child) { margin-right: 10px; }
 #session-list li:hover { background-color: var(--hover-bg); }
 #session-list li.active { background-color: var(--accent-color); color: white; }
@@ -80,14 +81,225 @@ button[type=submit]:disabled { background-color: #D1D5DB; cursor: not-allowed; }
 .auth-box button { background-color: var(--accent-color); color: #fff; padding: 12px; border: none; border-radius: var(--border-radius); cursor: pointer; font-size: 16px; font-weight: 500; }
 .auth-box #auth-message { margin-top: 16px; text-align: center; height: 1em; }
 .auth-box #switch-auth-mode { color: var(--text-secondary); text-align: center; display: block; margin-top: 16px; text-decoration: none; }
+
+/* --- 6. 代码高亮 --- */
 pre { background-color: var(--bg-content); color: var(--text-primary); padding: 16px; border-radius: var(--border-radius); overflow-x: auto; position: relative; border: 1px solid var(--border-color); }
-.thinking-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background-color: var(--bg-content); color: var(--text-secondary); font-size: 14px; border-bottom: 1px solid var(--border-color); cursor: pointer; }
-.toggle-thought .arrow { transition: transform .2s ease-in-out; }
-.toggle-thought .arrow.down { transform: rotate(0deg); }
-.toggle-thought .arrow:not(.down) { transform: rotate(-90deg); }
-.thought-wrapper { display: flex; flex-direction: column; max-height: 1000px; overflow: hidden; transition: max-height .3s ease-in-out; }
-.thought-wrapper.collapsed { max-height: 0; }
-.thought-process { font-size: 15px; color: var(--text-thought); padding: 16px 18px; position: relative; border-bottom: 1px dashed var(--border-color); }
-.thought-process:not(:empty)::before { content: ''; position: absolute; left: 18px; top: 16px; bottom: 16px; width: 3px; background-color: var(--border-color); border-radius: 2px; }
-.thought-process > * { padding-left: 24px; }
-.final-answer { padding: 16px 18px; }
+code { background-color: var(--bg-content); padding: 2px 4px; border-radius: 4px; font-size: 0.9em; }
+pre code { background-color: transparent; padding: 0; }
+
+/* --- 7. 思考过程和计时器样式 (新增核心功能) --- */
+.thinking-header { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    padding: 12px 18px; 
+    background-color: var(--thinking-bg); 
+    color: var(--text-secondary); 
+    font-size: 13px; /* 比正文小 */
+    font-weight: 500;
+    border-bottom: 1px solid var(--border-color); 
+    cursor: pointer; 
+    transition: background-color 0.2s;
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+}
+
+.thinking-header:hover {
+    background-color: var(--bg-content);
+}
+
+.timer {
+    color: var(--text-timer);
+    font-weight: 600;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.timer::before {
+    content: "⏱";
+    margin-right: 6px;
+    font-size: 14px;
+}
+
+.toggle-thought {
+    display: flex;
+    align-items: center;
+    padding: 2px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.toggle-thought:hover {
+    background-color: rgba(0,0,0,0.1);
+}
+
+.toggle-thought .arrow { 
+    transition: transform .2s ease-in-out; 
+    width: 14px;
+    height: 14px;
+}
+
+.toggle-thought .arrow.down { 
+    transform: rotate(0deg); 
+}
+
+.toggle-thought .arrow:not(.down) { 
+    transform: rotate(-90deg); 
+}
+
+.thought-wrapper { 
+    max-height: 0;
+    overflow: hidden; 
+    transition: max-height .3s ease-in-out, padding .3s ease-in-out;
+    background-color: var(--thinking-bg);
+}
+
+.thought-wrapper:not(.collapsed) { 
+    max-height: 1000px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.thought-process { 
+    font-size: 14px; /* 比正文小 */
+    color: var(--text-thought); 
+    padding: 16px 18px;
+    line-height: 1.6;
+    position: relative;
+    background-color: var(--thinking-bg);
+}
+
+.thought-process::before {
+    content: '';
+    position: absolute;
+    left: 18px;
+    top: 16px;
+    bottom: 16px;
+    width: 3px;
+    background: linear-gradient(to bottom, var(--accent-color), var(--text-thought));
+    border-radius: 2px;
+    opacity: 0.3;
+}
+
+.thought-process > * {
+    margin-left: 20px;
+    position: relative;
+}
+
+.thought-process p:first-child {
+    margin-top: 0;
+}
+
+.thought-process p:last-child {
+    margin-bottom: 0;
+}
+
+.final-answer { 
+    padding: 18px; 
+    background-color: var(--bg-main);
+    border-bottom-left-radius: var(--border-radius);
+    border-bottom-right-radius: var(--border-radius);
+    font-size: 16px; /* 正文大小 */
+    line-height: 1.7;
+}
+
+/* --- 8. 流式输出光标动画 --- */
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+.streaming-cursor::after {
+    content: "▋";
+    color: var(--accent-color);
+    animation: blink 1s infinite;
+    margin-left: 1px;
+}
+
+/* --- 9. 响应式设计优化 --- */
+@media (max-width: 768px) {
+    .sidebar-drawer {
+        width: 300px;
+    }
+    
+    .chat-box {
+        padding: 16px;
+    }
+    
+    .chat-form {
+        padding: 16px;
+    }
+    
+    .message {
+        max-width: 100%;
+        font-size: 15px;
+    }
+    
+    .thinking-header {
+        padding: 10px 14px;
+        font-size: 12px;
+    }
+    
+    .thought-process {
+        padding: 14px 16px;
+        font-size: 13px;
+    }
+    
+    .final-answer {
+        padding: 16px;
+        font-size: 15px;
+    }
+}
+
+/* --- 10. iOS 14.4 Safari 兼容性修复 --- */
+@supports not (gap: 10px) {
+    /* 为不支持 gap 的旧版本提供 margin 替代 */
+    #session-list li {
+        display: -webkit-box;
+        display: -webkit-flex;
+        display: flex;
+        -webkit-box-pack: justify;
+        -webkit-justify-content: space-between;
+        justify-content: space-between;
+    }
+}
+
+/* WebKit 前缀支持 */
+.thinking-header,
+.thought-wrapper,
+.toggle-thought .arrow {
+    -webkit-transition: all 0.3s ease-in-out;
+    -moz-transition: all 0.3s ease-in-out;
+    -o-transition: all 0.3s ease-in-out;
+    transition: all 0.3s ease-in-out;
+}
+
+/* 确保在 iOS Safari 上的触摸友好性 */
+.thinking-header,
+.toggle-thought,
+#session-list li {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
+/* --- 11. 辅助功能支持 --- */
+.thinking-header:focus,
+.toggle-thought:focus {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+}
+
+/* .timer[aria-live="polite"] { 为屏幕阅读器提供实时更新 } */
+
+/* --- 12. 性能优化 --- */
+.thought-process,
+.final-answer {
+    contain: layout style;
+    will-change: auto;
+}
+
+/* 减少重绘 */
+.message.assistant {
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+}

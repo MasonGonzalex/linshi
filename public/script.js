@@ -1,4 +1,4 @@
-// public/script.js (Final Stable Version - Corrected History Rendering)
+// public/script.js (iOS 14.4 兼容版 - 轮询机制 + 读秒功能)
 document.addEventListener("DOMContentLoaded", () => {
   // --- 状态管理 (State Management) ---
   let state = {
@@ -210,9 +210,7 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem("lastActiveSessionId", sessionId);
     renderSessions();
     try {
-      // 从后端获取的消息在这里被放入 state.currentMessages
       state.currentMessages = await apiRequest(`/api/sessions/${sessionId}/messages`);
-      // 然后调用 renderMessages 来渲染它们
       renderMessages();
       userInput.focus();
     } catch (error) {
@@ -254,41 +252,30 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- 消息渲染 (Message Rendering) ---
-  
-  // ======================= 核心修改在这里 =======================
   function renderMessages() {
     chatBox.innerHTML = "";
     if (state.currentMessages) {
       state.currentMessages
         .filter((msg) => msg.role !== "system")
         .forEach((msg) => {
-          // 对每一条消息都尝试解析
           try {
-            // 尝试将 content 解析为 JSON 对象
             const parsedContent = JSON.parse(msg.content);
-            
-            // 检查解析后的结果是否是我们期望的、包含 answer 的对象
             if (parsedContent && typeof parsedContent === 'object' && 'answer' in parsedContent) {
-              // 如果是，就用 thinking 模式渲染
               renderThinkingMessage(parsedContent);
             } else {
-              // 如果解析出来不是我们期望的格式（比如就是一个数字或普通JSON），按简单模式渲染原文
               renderSimpleMessage(msg.content, msg.role);
             }
           } catch (e) {
-            // 如果 JSON.parse 失败，说明它就是个普通字符串，按简单模式渲染
             renderSimpleMessage(msg.content, msg.role);
           }
         });
     }
     chatBox.scrollTop = chatBox.scrollHeight;
   }
-  // ======================= 修改结束 =======================
 
   function renderSimpleMessage(content, role) {
     const messageDiv = document.createElement("div");
     messageDiv.classList.add("message", role);
-    // 注意：这里我们不再尝试 stringify 对象，因为 renderMessages 已经分流了
     const markdownContent = String(content);
     messageDiv.innerHTML = marked.parse(markdownContent);
     chatBox.appendChild(messageDiv);
@@ -305,7 +292,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const thoughtBlock = (data.thought && data.thought.trim() !== '') ? `
       <div class="thinking-header">
-          <span class="timer">思考过程</span>
+          <span class="timer">思考过程 ${data.duration ? `(${data.duration}秒)` : ''}</span>
           <span class="toggle-thought">
               <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </span>
@@ -336,6 +323,23 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     chatBox.scrollTop = chatBox.scrollHeight;
     return messageDiv;
+  }
+
+  // --- 打字机效果函数 ---
+  function typewriterEffect(element, text, speed = 30) {
+    return new Promise((resolve) => {
+      let index = 0;
+      element.innerHTML = '';
+      const timer = setInterval(() => {
+        if (index < text.length) {
+          element.innerHTML += text.charAt(index);
+          index++;
+        } else {
+          clearInterval(timer);
+          resolve();
+        }
+      }, speed);
+    });
   }
 
   // --- 聊天与 API 交互 (Chat & API Interaction) ---
@@ -390,14 +394,106 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function handleStreamingChat(apiId, userMessage) {
     const startTime = Date.now();
+    
+    // 创建 AI 回复容器
     const assistantMessageDiv = document.createElement("div");
     assistantMessageDiv.className = "message assistant";
     chatBox.appendChild(assistantMessageDiv);
 
+    // 初始化状态变量
     let currentThought = "";
     let currentAnswer = "";
+    let timerElement = null;
+    let timerInterval = null;
+
+    // 创建初始 UI 结构
+    function createInitialUI() {
+      assistantMessageDiv.innerHTML = `
+        <div class="thinking-header">
+            <span class="timer">思考中 0.0 秒</span>
+            <span class="toggle-thought">
+                <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </span>
+        </div>
+        <div class="thought-wrapper collapsed">
+            <div class="thought-process"></div>
+        </div>
+        <div class="final-answer"></div>
+      `;
+      
+      timerElement = assistantMessageDiv.querySelector(".timer");
+      
+      // 绑定折叠/展开事件
+      const header = assistantMessageDiv.querySelector(".thinking-header");
+      const thoughtWrapper = assistantMessageDiv.querySelector(".thought-wrapper");
+      header.addEventListener("click", () => {
+        thoughtWrapper.classList.toggle("collapsed");
+        header.querySelector(".arrow").classList.toggle("down");
+      });
+    }
+
+    // 启动计时器
+    function startTimer() {
+      timerInterval = setInterval(() => {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        if (timerElement) {
+          timerElement.textContent = `思考中 ${elapsed} 秒`;
+        }
+      }, 100);
+    }
+
+    // 停止计时器并显示最终时间
+    function stopTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      const finalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+      if (timerElement) {
+        timerElement.textContent = `思考了 ${finalTime} 秒`;
+      }
+      return finalTime;
+    }
+
+    // 渐进式渲染内容（模拟打字机效果）
+    function renderStreamingContent(thought, answer) {
+      const thoughtElement = assistantMessageDiv.querySelector(".thought-process");
+      const answerElement = assistantMessageDiv.querySelector(".final-answer");
+      
+      if (thought !== currentThought) {
+        currentThought = thought;
+        if (thoughtElement && thought.trim()) {
+          thoughtElement.innerHTML = marked.parse(thought);
+          thoughtElement.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+        }
+      }
+      
+      if (answer !== currentAnswer) {
+        currentAnswer = answer;
+        if (answerElement) {
+          answerElement.innerHTML = marked.parse(answer + "▋"); // 添加光标效果
+          answerElement.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+        }
+      }
+      
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    // 完成渲染
+    function finalizeContent() {
+      const answerElement = assistantMessageDiv.querySelector(".final-answer");
+      if (answerElement) {
+        answerElement.innerHTML = marked.parse(currentAnswer); // 移除光标
+        answerElement.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
+      }
+    }
 
     try {
+      // 创建初始 UI 和启动计时器
+      createInitialUI();
+      startTimer();
+
+      // 发起聊天请求
       const requestResponse = await apiRequest("/api/chat-request", {
         method: "POST",
         body: JSON.stringify({
@@ -405,76 +501,61 @@ document.addEventListener("DOMContentLoaded", () => {
           apiId: apiId
         }),
       });
-      if (!requestResponse.taskId) throw new Error("未能获取有效的任务ID");
-      const {
-        taskId
-      } = requestResponse;
 
+      if (!requestResponse.taskId) {
+        throw new Error("未能获取有效的任务ID");
+      }
+
+      const { taskId } = requestResponse;
+
+      // 轮询获取结果
       await new Promise((resolve, reject) => {
-        const intervalId = setInterval(async () => {
+        const pollInterval = setInterval(async () => {
           try {
             const pollResponse = await apiRequest(`/api/chat-poll/${taskId}`);
+            
             if (pollResponse.error) {
-              clearInterval(intervalId);
+              clearInterval(pollInterval);
               return reject(new Error(pollResponse.error));
             }
 
-            if (pollResponse.fullThought !== currentThought || pollResponse.fullAnswer !== currentAnswer) {
-              currentThought = pollResponse.fullThought;
-              currentAnswer = pollResponse.fullAnswer;
+            // 更新内容
+            renderStreamingContent(
+              pollResponse.fullThought || "", 
+              pollResponse.fullAnswer || ""
+            );
 
-              const thoughtBlock = (currentThought && currentThought.trim() !== '') ? `
-                <div class="thinking-header">
-                    <span class="timer">思考过程</span>
-                    <span class="toggle-thought">
-                        <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    </span>
-                </div>
-                <div class="thought-wrapper collapsed">
-                    <div class="thought-process">${marked.parse(currentThought)}</div>
-                </div>` : '';
-
-              const cursor = pollResponse.done ? "" : "▋";
-              assistantMessageDiv.innerHTML = `
-                ${thoughtBlock}
-                <div class="final-answer">${marked.parse(currentAnswer + cursor)}</div>
-              `;
-              
-              const header = assistantMessageDiv.querySelector(".thinking-header");
-              if (header && !header.dataset.listenerAttached) {
-                header.addEventListener('click', () => {
-                  const wrapper = assistantMessageDiv.querySelector(".thought-wrapper");
-                  wrapper.classList.toggle("collapsed");
-                  header.querySelector(".arrow").classList.toggle("down");
-                });
-                header.dataset.listenerAttached = "true";
-              }
-              
-              chatBox.scrollTop = chatBox.scrollHeight;
-            }
-
+            // 检查是否完成
             if (pollResponse.done) {
-              clearInterval(intervalId);
+              clearInterval(pollInterval);
               resolve();
             }
           } catch (error) {
-            clearInterval(intervalId);
+            clearInterval(pollInterval);
             reject(error);
           }
-        }, 300);
+        }, 200); // 200ms 轮询间隔，确保流畅体验
       });
+
     } catch (error) {
-      assistantMessageDiv.innerHTML = `<div class="final-answer"><span style="color: red;">请求处理错误: ${error.message}</span></div>`;
+      console.error("聊天请求错误:", error);
+      assistantMessageDiv.innerHTML = `
+        <div class="final-answer">
+          <span style="color: red;">请求处理错误: ${error.message}</span>
+        </div>
+      `;
       return;
     } finally {
-      assistantMessageDiv.remove();
-      const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+      // 停止计时器并完成渲染
+      const duration = stopTimer();
+      finalizeContent();
+
+      // 保存消息到数据库
       const messageData = {
         thought: currentThought,
         answer: currentAnswer,
         duration: duration
       };
-      renderThinkingMessage(messageData);
 
       const finalMessage = {
         role: "assistant",
