@@ -2,17 +2,75 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#0E9F6E">
+    <meta name="format-detection" content="telephone=no">
     <title>智核 AI - 智能对话助手</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+    
+    <!-- 优化：内联关键CSS以减少首次加载时间 -->
+    <style>
+        /* 关键路径CSS - 立即显示基础布局 */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+            background: #F3F4F6; 
+            height: 100vh; 
+            overflow: hidden;
+            /* iOS安全区域适配 */
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .loading-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            background: #F9FAFB; z-index: 9999;
+            flex-direction: column;
+        }
+        .loading-spinner {
+            width: 40px; height: 40px; border: 3px solid #E5E7EB;
+            border-top: 3px solid #0E9F6E; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 16px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden { display: none !important; }
+        
+        /* Chrome顶部横幅适配 */
+        .header {
+            padding: max(12px, env(safe-area-inset-top)) 24px 12px 24px;
+            border-bottom: 1px solid #E5E7EB;
+            background: #F9FAFB;
+            display: flex; align-items: center;
+            min-height: 56px; /* 确保最小高度 */
+        }
+        
+        /* iOS 14.4 Flexbox兼容性修复 */
+        .main-container { 
+            display: -webkit-box; display: -webkit-flex; display: flex; 
+            height: 100vh; height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+        }
+    </style>
+    
+    <!-- 延迟加载外部CSS -->
+    <link rel="preload" href="style.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="style.css"></noscript>
+    
+    <!-- 预连接到CDN以加速资源加载 -->
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com">
+    
+    <!-- PWA相关 -->
     <link rel="apple-touch-icon" href="/favicon.ico">
     <link rel="manifest" href="/manifest.json">
 </head>
 <body>
+    <!-- 加载屏幕 -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-spinner"></div>
+        <div style="color: #6B7280; font-size: 14px;">正在加载智核AI...</div>
+    </div>
+
     <!-- 历史记录抽屉容器 -->
     <div id="history-drawer" class="sidebar-drawer">
         <div class="sidebar">
@@ -89,129 +147,204 @@
         </div>
     </div>
 
-    <!-- iOS 14.4 兼容的 Polyfills -->
+    <!-- iOS 14.4 兼容性增强脚本 - 立即执行 -->
     <script>
-        // iOS 14.4 Promise.allSettled polyfill
-        if (!Promise.allSettled) {
-            Promise.allSettled = function(promises) {
-                return Promise.all(promises.map(p => Promise.resolve(p).then(
-                    value => ({ status: 'fulfilled', value }),
-                    reason => ({ status: 'rejected', reason })
-                )));
-            };
-        }
-
-        // iOS 14.4 fetch timeout polyfill
-        if (typeof AbortController === 'undefined') {
-            window.AbortController = class AbortController {
-                constructor() {
-                    this.signal = { aborted: false };
-                }
-                abort() {
-                    this.signal.aborted = true;
-                }
-            };
-        }
-
-        // iOS 14.4 优化：防止页面缩放
-        document.addEventListener('gesturestart', function (e) {
-            e.preventDefault();
-        });
-        
-        document.addEventListener('gesturechange', function (e) {
-            e.preventDefault();
-        });
-        
-        document.addEventListener('gestureend', function (e) {
-            e.preventDefault();
-        });
-
-        // 防止双击缩放
-        let lastTouchEnd = 0;
-        document.addEventListener('touchend', function (event) {
-            const now = (new Date()).getTime();
-            if (now - lastTouchEnd <= 300) {
-                event.preventDefault();
+        (function() {
+            'use strict';
+            
+            // iOS 14.4 Promise.allSettled polyfill
+            if (!Promise.allSettled) {
+                Promise.allSettled = function(promises) {
+                    return Promise.all(promises.map(p => Promise.resolve(p).then(
+                        value => ({ status: 'fulfilled', value }),
+                        reason => ({ status: 'rejected', reason })
+                    )));
+                };
             }
-            lastTouchEnd = now;
-        }, false);
 
-        // iOS Safari 视口高度修复
-        function setViewportHeight() {
-            const vh = window.innerHeight * 0.01;
-            document.documentElement.style.setProperty('--vh', vh + 'px');
-        }
-        
-        setViewportHeight();
-        window.addEventListener('resize', setViewportHeight);
-        window.addEventListener('orientationchange', function() {
-            setTimeout(setViewportHeight, 100);
-        });
+            // iOS 14.4 AbortController polyfill
+            if (typeof AbortController === 'undefined') {
+                window.AbortController = class AbortController {
+                    constructor() {
+                        this.signal = { aborted: false };
+                    }
+                    abort() {
+                        this.signal.aborted = true;
+                    }
+                };
+            }
+
+            // 禁用iOS缩放手势
+            document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+            document.addEventListener('gesturechange', function (e) { e.preventDefault(); }, { passive: false });
+            document.addEventListener('gestureend', function (e) { e.preventDefault(); }, { passive: false });
+
+            // 防止双击缩放
+            let lastTouchEnd = 0;
+            document.addEventListener('touchend', function (event) {
+                const now = Date.now();
+                if (now - lastTouchEnd <= 300) {
+                    event.preventDefault();
+                }
+                lastTouchEnd = now;
+            }, { passive: false });
+
+            // iOS Safari 视口高度修复
+            function updateViewportHeight() {
+                const vh = window.innerHeight * 0.01;
+                document.documentElement.style.setProperty('--vh', vh + 'px');
+            }
+            
+            updateViewportHeight();
+            window.addEventListener('resize', updateViewportHeight, { passive: true });
+            window.addEventListener('orientationchange', function() {
+                setTimeout(updateViewportHeight, 150);
+            }, { passive: true });
+
+            // 预加载关键资源
+            function preloadResource(href, as, type) {
+                const link = document.createElement('link');
+                link.rel = 'preload';
+                link.href = href;
+                link.as = as;
+                if (type) link.type = type;
+                link.crossOrigin = 'anonymous';
+                document.head.appendChild(link);
+            }
+
+            // 延迟预加载非关键资源
+            setTimeout(() => {
+                preloadResource('https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js', 'script');
+                preloadResource('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js', 'script');
+            }, 100);
+
+        })();
     </script>
 
-    <!-- 依赖库加载 -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js" 
-            integrity="sha512-p2nQoKTdTVpQ9aApDKfHyYczMrjs9yb14vJU4p6zDLKjyfN4pNM2P8H1KxqUEE5XcH78GQ89C8CQMw4/YKzYkw==" 
-            crossorigin="anonymous" 
-            referrerpolicy="no-referrer">
-    </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" 
-            integrity="sha512-D9gUyxqja7hBtkWpPWGt9wfbfaMGVt9gnyCvYa+jojwwPHLCzUm5i8rpk7vD7wNee9bA35eYIjobYPaQuKS1MQ==" 
-            crossorigin="anonymous" 
-            referrerpolicy="no-referrer">
-    </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js"
-            crossorigin="anonymous" 
-            referrerpolicy="no-referrer">
-    </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"
-            crossorigin="anonymous" 
-            referrerpolicy="no-referrer">
-    </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"
-            crossorigin="anonymous" 
-            referrerpolicy="no-referrer">
-    </script>
-    
-    <!-- 主要应用脚本 -->
-    <script src="script.js"></script>
+    <!-- 资源加载管理器 -->
+    <script>
+        (function() {
+            'use strict';
+            
+            const loadingScreen = document.getElementById('loading-screen');
+            let resourcesLoaded = 0;
+            const totalResources = 3; // CSS + 2个核心JS
+            
+            function updateLoadingProgress() {
+                resourcesLoaded++;
+                if (resourcesLoaded >= totalResources) {
+                    // 延迟隐藏加载屏幕，确保样式已应用
+                    setTimeout(() => {
+                        loadingScreen.style.opacity = '0';
+                        loadingScreen.style.transition = 'opacity 0.3s ease-out';
+                        setTimeout(() => {
+                            loadingScreen.remove();
+                        }, 300);
+                    }, 100);
+                }
+            }
 
-    <!-- 服务工作者注册 (PWA支持) -->
+            // 动态加载脚本的函数
+            function loadScript(src, onLoad) {
+                return new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.crossOrigin = 'anonymous';
+                    script.referrerPolicy = 'no-referrer';
+                    
+                    script.onload = () => {
+                        updateLoadingProgress();
+                        if (onLoad) onLoad();
+                        resolve();
+                    };
+                    
+                    script.onerror = () => {
+                        console.error('Failed to load script:', src);
+                        updateLoadingProgress(); // 即使失败也要继续
+                        resolve(); // 不阻塞其他资源
+                    };
+                    
+                    document.head.appendChild(script);
+                });
+            }
+
+            // CSS加载完成回调
+            const styleLink = document.querySelector('link[href="style.css"]');
+            if (styleLink) {
+                styleLink.onload = updateLoadingProgress;
+                styleLink.onerror = updateLoadingProgress;
+            } else {
+                updateLoadingProgress(); // 如果CSS已经加载
+            }
+
+            // 顺序加载脚本以避免iOS 14.4的并发问题
+            window.addEventListener('DOMContentLoaded', async () => {
+                try {
+                    // 先加载marked
+                    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js');
+                    
+                    // 再加载highlight.js
+                    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js', () => {
+                        // highlight.js加载完成后立即加载语言包
+                        loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js');
+                        loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js');
+                        loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js');
+                    });
+                    
+                    // 最后加载主应用脚本
+                    await loadScript('script.js');
+                    
+                } catch (error) {
+                    console.error('Resource loading error:', error);
+                    // 即使出错也要隐藏加载屏幕
+                    setTimeout(() => loadingScreen.remove(), 1000);
+                }
+            });
+
+        })();
+    </script>
+
+    <!-- PWA服务工作者注册 -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', function() {
-                navigator.serviceWorker.register('/sw.js').then(function(registration) {
-                    console.log('SW registered with scope: ', registration.scope);
-                }, function(err) {
+                navigator.serviceWorker.register('/sw.js')
+                .then(function(registration) {
+                    console.log('SW registered: ', registration.scope);
+                })
+                .catch(function(err) {
                     console.log('SW registration failed: ', err);
                 });
             });
         }
     </script>
 
-    <!-- 错误监控 -->
+    <!-- 错误监控和性能统计 -->
     <script>
+        // 全局错误处理
         window.addEventListener('error', function(e) {
             console.error('Global error:', e.error);
-            // 在生产环境中，可以发送错误报告到服务器
-        });
+        }, { passive: true });
 
         window.addEventListener('unhandledrejection', function(e) {
             console.error('Unhandled promise rejection:', e.reason);
-            e.preventDefault(); // 防止错误显示在控制台
-        });
-    </script>
+            e.preventDefault();
+        }, { passive: true });
 
-    <!-- 性能监控 -->
-    <script>
+        // 性能监控
         if ('performance' in window) {
             window.addEventListener('load', function() {
                 setTimeout(function() {
-                    const perfData = window.performance.timing;
+                    const perfData = performance.timing;
                     const loadTime = perfData.loadEventEnd - perfData.navigationStart;
                     console.log('页面加载时间:', loadTime + 'ms');
-                }, 0);
-            });
+                    
+                    // iOS 14.4 性能优化提示
+                    if (loadTime > 3000) {
+                        console.warn('加载时间较长，建议检查网络连接');
+                    }
+                }, 100);
+            }, { passive: true });
         }
     </script>
 </body>

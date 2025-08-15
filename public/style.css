@@ -1,24 +1,29 @@
-/* =================================================================== */
-/* ==   style.css (iOS 14.4 兼容版 - 增强读秒和思考过程功能)     == */
-/* =================================================================== */
-
-/* --- 1. 字体与全局设置 --- */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
 
 :root {
-    --bg-main: #FFFFFF; /* 主背景 - 白色 */
-    --bg-sidebar: #F9FAFB; /* 侧边栏背景 - 极浅灰色 */
-    --bg-content: #F3F4F6; /* 内容/聊天气泡背景 - 稍深一点的灰色 */
-    --bg-input: #FFFFFF; /* 输入框背景 */
-    --text-primary: #1F2937; /* 主要文本 - 深灰色 */
-    --text-secondary: #6B7280; /* 次要文本 - 中灰色 */
-    --text-thought: #9CA3AF; /* 思考过程 - 浅灰色 */
-    --text-timer: #059669; /* 计时器颜色 - 绿色 */
-    --accent-color: #0E9F6E; /* 强调色 - 精致的绿色 */
-    --border-color: #E5E7EB; /* 边框颜色 */
-    --hover-bg: #E5E7EB; /* 悬停背景色 */
-    --border-radius: 8px; /* 统一圆角 */
-    --thinking-bg: #F8FAFC; /* 思考过程背景色 */
+    --bg-main: #FFFFFF;
+    --bg-sidebar: #F9FAFB;
+    --bg-content: #F3F4F6;
+    --bg-input: #FFFFFF;
+    --text-primary: #1F2937;
+    --text-secondary: #6B7280;
+    --text-thought: #9CA3AF;
+    --text-timer: #059669;
+    --accent-color: #0E9F6E;
+    --border-color: #E5E7EB;
+    --hover-bg: #E5E7EB;
+    --border-radius: 8px;
+    --thinking-bg: #F8FAFC;
+    --safe-area-top: env(safe-area-inset-top, 0px);
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+    --vh: 1vh;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -26,85 +31,550 @@ body {
     margin: 0;
     background-color: var(--bg-content);
     height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
     overflow: hidden;
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+.loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: #F9FAFB;
+    z-index: 9999;
+    flex-direction: column;
+    opacity: 1;
+    transition: opacity 0.5s ease-out;
+}
+
+.loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #E5E7EB;
+    border-top: 3px solid #0E9F6E;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 16px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.hidden {
+    display: none !important;
+}
+
+.main-container {
+    display: -webkit-box;
+    display: -webkit-flex;
+    display: flex;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
+    width: 100%;
+    position: relative;
+}
+
+.sidebar-drawer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
+    width: 280px;
+    z-index: 200;
+    background-color: var(--bg-sidebar);
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 2px 0 10px rgba(0, 0, 0, 0.05);
+    border-right: 1px solid var(--border-color);
+    will-change: transform;
+    padding-top: var(--safe-area-top);
+}
+
+.sidebar-drawer.open {
+    transform: translateX(0);
+}
+
+.sidebar {
+    width: 100%;
+    height: 100%;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.drawer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
+    background-color: rgba(0, 0, 0, 0.3);
+    z-index: 199;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+}
+
+.drawer-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.chat-container {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
+    background-color: var(--bg-main);
+    position: relative;
+}
+
+.header {
+    padding: max(12px, var(--safe-area-top)) 24px 12px 24px;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--bg-sidebar);
+    display: flex;
+    align-items: center;
+    min-height: calc(56px + var(--safe-area-top));
+    position: relative;
+    z-index: 10;
+    flex-shrink: 0;
+}
+
+#new-chat-btn {
+    width: 100%;
+    padding: 12px 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: var(--border-radius);
+    text-align: left;
+    font-size: 15px;
+    font-weight: 500;
+    transition: background-color 0.2s ease;
+    touch-action: manipulation;
+}
+
+#new-chat-btn:hover,
+#new-chat-btn:active {
+    background-color: var(--hover-bg);
+}
+
+#session-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    flex: 1;
+    -webkit-overflow-scrolling: touch;
+}
+
+#session-list li {
+    padding: 12px 16px;
+    margin-bottom: 4px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s ease;
+    touch-action: manipulation;
+    min-height: 48px;
+}
+
+#session-list li:hover,
+#session-list li:active {
+    background-color: var(--hover-bg);
+}
+
+#session-list li.active {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+#session-list li.active .session-time {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.session-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    font-size: 15px;
+    margin-right: 10px;
+}
+
+.session-time {
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+#user-info {
+    padding: 12px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 14px;
+    flex-shrink: 0;
+    margin-top: auto;
+}
+
+#logout-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: var(--border-radius);
+    transition: all 0.2s ease;
+    touch-action: manipulation;
+    font-size: 13px;
+}
+
+#logout-btn:hover,
+#logout-btn:active {
+    background-color: var(--text-secondary);
+    color: white;
+    border-color: var(--text-secondary);
+}
+
+#history-toggle-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 8px;
+    margin-right: 16px;
+    border-radius: var(--border-radius);
+    transition: all 0.2s ease;
+    touch-action: manipulation;
+    min-width: 40px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#history-toggle-btn svg {
+    display: block;
+    width: 20px;
+    height: 20px;
+}
+
+#history-toggle-btn:hover,
+#history-toggle-btn:active {
+    background-color: var(--hover-bg);
     color: var(--text-primary);
 }
 
-/* --- 2. 布局 --- */
-.main-container { display: flex; height: 100%; }
-.sidebar-drawer { position: fixed; top: 0; left: 0; height: 100%; width: 280px; z-index: 200; background-color: var(--bg-sidebar); transform: translateX(-100%); transition: transform .3s ease-in-out; box-shadow: 2px 0 10px rgba(0,0,0,.05); border-right: 1px solid var(--border-color); }
-.sidebar-drawer.open { transform: translateX(0); }
-.sidebar { width: 100%; height: 100%; padding: 12px; display: flex; flex-direction: column; box-sizing: border-box; }
-.drawer-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,.3); z-index: 199; opacity: 0; visibility: hidden; transition: opacity .3s ease-in-out, visibility .3s ease-in-out; }
-.drawer-overlay.visible { opacity: 1; visibility: visible; }
-.chat-container { width: 100%; flex-grow: 1; display: flex; flex-direction: column; height: 100%; background-color: var(--bg-main); }
-
-/* --- 3. 侧边栏 --- */
-#new-chat-btn { width: 100%; padding: 12px 16px; margin-bottom: 12px; border: 1px solid var(--border-color); background-color: var(--bg-main); color: var(--text-primary); cursor: pointer; border-radius: var(--border-radius); text-align: left; font-size: 15px; font-weight: 500; transition: background-color 0.2s; }
-#new-chat-btn:hover { background-color: var(--hover-bg); }
-#session-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; flex-grow: 1; }
-#session-list li { padding: 12px 16px; margin-bottom: 4px; border-radius: var(--border-radius); cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: background-color 0.2s; }
-#session-list li > *:not(:last-child) { margin-right: 10px; }
-#session-list li:hover { background-color: var(--hover-bg); }
-#session-list li.active { background-color: var(--accent-color); color: white; }
-#session-list li.active .session-time { color: rgba(255,255,255,0.7); }
-.session-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-grow: 1; font-size: 15px; }
-.session-time { font-size: 12px; color: var(--text-secondary); flex-shrink: 0; }
-#user-info { padding: 12px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
-#logout-btn { background: none; border: 1px solid var(--border-color); color: var(--text-secondary); cursor: pointer; padding: 6px 12px; border-radius: var(--border-radius); transition: all 0.2s; }
-#logout-btn:hover { background-color: var(--text-secondary); color: white; border-color: var(--text-secondary); }
-
-/* --- 4. 聊天主窗口 --- */
-.header { padding: 12px 24px; border-bottom: 1px solid var(--border-color); background-color: var(--bg-sidebar); display: flex; align-items: center; }
-#history-toggle-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 6px; margin-right: 16px; border-radius: var(--border-radius); transition: all 0.2s; }
-#history-toggle-btn svg { display: block; }
-#history-toggle-btn:hover { background-color: var(--hover-bg); color: var(--text-primary); }
-#model-select { padding: 8px 12px; border-radius: var(--border-radius); border: 1px solid var(--border-color); background-color: var(--bg-main); color: var(--text-primary); font-size: 15px; }
-.chat-box { flex-grow: 1; padding: 24px; overflow-y: auto; }
-.message { border-radius: var(--border-radius); margin-bottom: 20px; max-width: 95%; line-height: 1.7; font-size: 16px; }
-.user { padding: 16px; background-color: var(--accent-color); color: white; align-self: flex-end; margin-left: auto; }
-.assistant { background-color: transparent; align-self: flex-start; border: 1px solid var(--border-color); }
-.chat-form { display: flex; padding: 24px; border-top: 1px solid var(--border-color); background-color: var(--bg-sidebar); }
-#user-input { flex-grow: 1; border: 1px solid var(--border-color); background-color: var(--bg-main); color: var(--text-primary); border-radius: var(--border-radius); padding: 14px 18px; font-size: 16px; margin-right: 12px; transition: border-color 0.2s, box-shadow 0.2s; }
-#user-input:focus { border-color: var(--accent-color); box-shadow: 0 0 0 2px rgba(14, 159, 110, 0.2); outline: none; }
-button[type=submit] { background-color: var(--accent-color); color: #fff; border: none; padding: 14px 24px; border-radius: var(--border-radius); cursor: pointer; font-size: 16px; font-weight: 500; transition: background-color 0.2s; }
-button[type=submit]:hover { background-color: #0c8a5e; }
-button[type=submit]:disabled { background-color: #D1D5DB; cursor: not-allowed; }
-
-/* --- 5. 认证与细节 --- */
-.hidden { display: none !important; }
-.auth-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background-color: rgba(249, 250, 251, 0.9); z-index: 1000; }
-.auth-box { background-color: var(--bg-main); color: var(--text-primary); padding: 32px; border-radius: var(--border-radius); box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1); width: 100%; max-width: 400px; }
-.auth-box h2 { text-align: center; margin-top: 0; margin-bottom: 24px; }
-.auth-box form { display: flex; flex-direction: column; }
-.auth-box input { background-color: var(--bg-content); color: var(--text-primary); border: 1px solid var(--border-color); padding: 12px; border-radius: var(--border-radius); margin-bottom: 16px; font-size: 16px; }
-.auth-box button { background-color: var(--accent-color); color: #fff; padding: 12px; border: none; border-radius: var(--border-radius); cursor: pointer; font-size: 16px; font-weight: 500; }
-.auth-box #auth-message { margin-top: 16px; text-align: center; height: 1em; }
-.auth-box #switch-auth-mode { color: var(--text-secondary); text-align: center; display: block; margin-top: 16px; text-decoration: none; }
-
-/* --- 6. 代码高亮 --- */
-pre { background-color: var(--bg-content); color: var(--text-primary); padding: 16px; border-radius: var(--border-radius); overflow-x: auto; position: relative; border: 1px solid var(--border-color); }
-code { background-color: var(--bg-content); padding: 2px 4px; border-radius: 4px; font-size: 0.9em; }
-pre code { background-color: transparent; padding: 0; }
-
-/* --- 7. 思考过程和计时器样式 (新增核心功能) --- */
-.thinking-header { 
-    display: flex; 
-    justify-content: space-between; 
-    align-items: center; 
-    padding: 12px 18px; 
-    background-color: var(--thinking-bg); 
-    color: var(--text-secondary); 
-    font-size: 13px; /* 比正文小 */
-    font-weight: 500;
-    border-bottom: 1px solid var(--border-color); 
-    cursor: pointer; 
-    transition: background-color 0.2s;
-    border-top-left-radius: var(--border-radius);
-    border-top-right-radius: var(--border-radius);
+#model-select {
+    padding: 8px 12px;
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    font-size: 15px;
+    min-width: 150px;
 }
 
-.thinking-header:hover {
+.chat-box {
+    flex: 1;
+    padding: 16px 24px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    contain: layout;
+}
+
+.message {
+    border-radius: var(--border-radius);
+    margin-bottom: 20px;
+    max-width: 95%;
+    line-height: 1.7;
+    font-size: 16px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.user {
+    padding: 16px;
+    background-color: var(--accent-color);
+    color: white;
+    align-self: flex-end;
+    margin-left: auto;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.assistant {
+    background-color: transparent;
+    align-self: flex-start;
+    border: 1px solid var(--border-color);
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.chat-form {
+    display: flex;
+    padding: 16px 24px calc(16px + var(--safe-area-bottom)) 24px;
+    border-top: 1px solid var(--border-color);
+    background-color: var(--bg-sidebar);
+    flex-shrink: 0;
+    gap: 12px;
+}
+
+#user-input {
+    flex: 1;
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    border-radius: var(--border-radius);
+    padding: 14px 18px;
+    font-size: 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    resize: none;
+    min-height: 48px;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+#user-input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(14, 159, 110, 0.2);
+    outline: none;
+}
+
+#user-input::placeholder {
+    color: var(--text-secondary);
+}
+
+button[type="submit"] {
+    background-color: var(--accent-color);
+    color: #fff;
+    border: none;
+    padding: 14px 24px;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    touch-action: manipulation;
+    min-width: 80px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+button[type="submit"]:hover:not(:disabled) {
+    background-color: #0c8a5e;
+    transform: translateY(-1px);
+}
+
+button[type="submit"]:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+button[type="submit"]:disabled {
+    background-color: #D1D5DB;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.auth-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    height: calc(var(--vh, 1vh) * 100);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: rgba(249, 250, 251, 0.95);
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.auth-box {
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+    padding: 32px;
+    border-radius: var(--border-radius);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    width: 100%;
+    max-width: 400px;
+    margin: 20px;
+    animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.auth-box h2 {
+    text-align: center;
+    margin-top: 0;
+    margin-bottom: 24px;
+    font-size: 24px;
+    font-weight: 600;
+}
+
+.auth-box form {
+    display: flex;
+    flex-direction: column;
+}
+
+.auth-box input {
+    background-color: var(--bg-content);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    padding: 12px 16px;
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+    font-size: 16px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.auth-box input:focus {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 2px rgba(14, 159, 110, 0.2);
+    outline: none;
+}
+
+.auth-box button {
+    background-color: var(--accent-color);
+    color: #fff;
+    padding: 12px 24px;
+    border: none;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    touch-action: manipulation;
+    min-height: 48px;
+}
+
+.auth-box button:hover:not(:disabled) {
+    background-color: #0c8a5e;
+}
+
+.auth-box button:disabled {
+    background-color: #D1D5DB;
+    cursor: not-allowed;
+}
+
+.auth-box #auth-message {
+    margin-top: 16px;
+    text-align: center;
+    min-height: 20px;
+    font-size: 14px;
+}
+
+.auth-box #switch-auth-mode {
+    color: var(--accent-color);
+    text-align: center;
+    display: block;
+    margin-top: 16px;
+    text-decoration: none;
+    font-size: 14px;
+    transition: color 0.2s ease;
+    cursor: pointer;
+    touch-action: manipulation;
+}
+
+.auth-box #switch-auth-mode:hover {
+    color: #0c8a5e;
+    text-decoration: underline;
+}
+
+pre {
+    background-color: var(--bg-content);
+    color: var(--text-primary);
+    padding: 16px;
+    border-radius: var(--border-radius);
+    overflow-x: auto;
+    position: relative;
+    border: 1px solid var(--border-color);
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 12px 0;
+    -webkit-overflow-scrolling: touch;
+}
+
+code {
+    background-color: var(--bg-content);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: 'Monaco', 'Consolas', 'Courier New', monospace;
+    border: 1px solid var(--border-color);
+}
+
+pre code {
+    background-color: transparent;
+    padding: 0;
+    border: none;
+    font-size: 13px;
+}
+
+.thinking-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px;
+    background-color: var(--thinking-bg);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    border-top-left-radius: var(--border-radius);
+    border-top-right-radius: var(--border-radius);
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.thinking-header:hover,
+.thinking-header:active {
     background-color: var(--bg-content);
 }
 
@@ -114,6 +584,7 @@ pre code { background-color: transparent; padding: 0; }
     font-size: 12px;
     display: inline-flex;
     align-items: center;
+    font-variant-numeric: tabular-nums;
 }
 
 .timer::before {
@@ -125,48 +596,53 @@ pre code { background-color: transparent; padding: 0; }
 .toggle-thought {
     display: flex;
     align-items: center;
-    padding: 2px;
+    padding: 4px;
     border-radius: 4px;
-    transition: background-color 0.2s;
+    transition: background-color 0.2s ease;
+    touch-action: manipulation;
 }
 
-.toggle-thought:hover {
-    background-color: rgba(0,0,0,0.1);
+.toggle-thought:hover,
+.toggle-thought:active {
+    background-color: rgba(0, 0, 0, 0.1);
 }
 
-.toggle-thought .arrow { 
-    transition: transform .2s ease-in-out; 
+.toggle-thought .arrow {
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     width: 14px;
     height: 14px;
+    stroke: currentColor;
 }
 
-.toggle-thought .arrow.down { 
-    transform: rotate(0deg); 
+.toggle-thought .arrow.down {
+    transform: rotate(0deg);
 }
 
-.toggle-thought .arrow:not(.down) { 
-    transform: rotate(-90deg); 
+.toggle-thought .arrow:not(.down) {
+    transform: rotate(-90deg);
 }
 
-.thought-wrapper { 
+.thought-wrapper {
     max-height: 0;
-    overflow: hidden; 
-    transition: max-height .3s ease-in-out, padding .3s ease-in-out;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), padding 0.4s ease;
     background-color: var(--thinking-bg);
 }
 
-.thought-wrapper:not(.collapsed) { 
-    max-height: 1000px;
+.thought-wrapper:not(.collapsed) {
+    max-height: 2000px;
     border-bottom: 1px solid var(--border-color);
 }
 
-.thought-process { 
-    font-size: 14px; /* 比正文小 */
-    color: var(--text-thought); 
-    padding: 16px 18px;
+.thought-process {
+    font-size: 14px;
+    color: var(--text-thought);
+    padding: 16px 18px 16px 38px;
     line-height: 1.6;
     position: relative;
     background-color: var(--thinking-bg);
+    user-select: text;
+    -webkit-user-select: text;
 }
 
 .thought-process::before {
@@ -181,11 +657,6 @@ pre code { background-color: transparent; padding: 0; }
     opacity: 0.3;
 }
 
-.thought-process > * {
-    margin-left: 20px;
-    position: relative;
-}
-
 .thought-process p:first-child {
     margin-top: 0;
 }
@@ -194,16 +665,17 @@ pre code { background-color: transparent; padding: 0; }
     margin-bottom: 0;
 }
 
-.final-answer { 
-    padding: 18px; 
+.final-answer {
+    padding: 18px;
     background-color: var(--bg-main);
     border-bottom-left-radius: var(--border-radius);
     border-bottom-right-radius: var(--border-radius);
-    font-size: 16px; /* 正文大小 */
+    font-size: 16px;
     line-height: 1.7;
+    user-select: text;
+    -webkit-user-select: text;
 }
 
-/* --- 8. 流式输出光标动画 --- */
 @keyframes blink {
     0%, 50% { opacity: 1; }
     51%, 100% { opacity: 0; }
@@ -216,18 +688,17 @@ pre code { background-color: transparent; padding: 0; }
     margin-left: 1px;
 }
 
-/* --- 9. 响应式设计优化 --- */
-@media (max-width: 768px) {
+@media screen and (max-width: 768px) {
     .sidebar-drawer {
-        width: 300px;
+        width: min(300px, 85vw);
     }
     
     .chat-box {
-        padding: 16px;
+        padding: 12px 16px;
     }
     
     .chat-form {
-        padding: 16px;
+        padding: 12px 16px calc(12px + var(--safe-area-bottom)) 16px;
     }
     
     .message {
@@ -241,7 +712,7 @@ pre code { background-color: transparent; padding: 0; }
     }
     
     .thought-process {
-        padding: 14px 16px;
+        padding: 14px 16px 14px 32px;
         font-size: 13px;
     }
     
@@ -249,57 +720,103 @@ pre code { background-color: transparent; padding: 0; }
         padding: 16px;
         font-size: 15px;
     }
-}
-
-/* --- 10. iOS 14.4 Safari 兼容性修复 --- */
-@supports not (gap: 10px) {
-    /* 为不支持 gap 的旧版本提供 margin 替代 */
-    #session-list li {
-        display: -webkit-box;
-        display: -webkit-flex;
-        display: flex;
-        -webkit-box-pack: justify;
-        -webkit-justify-content: space-between;
-        justify-content: space-between;
+    
+    .auth-box {
+        margin: 16px;
+        padding: 24px;
+    }
+    
+    #user-input {
+        font-size: 16px;
     }
 }
 
-/* WebKit 前缀支持 */
+@media screen and (max-width: 480px) {
+    .sidebar-drawer {
+        width: 90vw;
+    }
+    
+    .header {
+        padding: max(8px, var(--safe-area-top)) 16px 8px 16px;
+    }
+    
+    .chat-box {
+        padding: 8px 12px;
+    }
+    
+    .chat-form {
+        padding: 8px 12px calc(8px + var(--safe-area-bottom)) 12px;
+    }
+}
+
+@supports (-webkit-touch-callout: none) {
+    .main-container {
+        height: -webkit-fill-available;
+    }
+    
+    .sidebar-drawer {
+        height: -webkit-fill-available;
+    }
+    
+    .drawer-overlay {
+        height: -webkit-fill-available;
+    }
+    
+    .chat-container {
+        height: -webkit-fill-available;
+    }
+}
+
+@supports not (gap: 10px) {
+    .chat-form {
+        gap: 0;
+    }
+    
+    #user-input {
+        margin-right: 12px;
+    }
+}
+
 .thinking-header,
 .thought-wrapper,
 .toggle-thought .arrow {
     -webkit-transition: all 0.3s ease-in-out;
     -moz-transition: all 0.3s ease-in-out;
     -o-transition: all 0.3s ease-in-out;
-    transition: all 0.3s ease-in-out;
 }
 
-/* 确保在 iOS Safari 上的触摸友好性 */
-.thinking-header,
-.toggle-thought,
-#session-list li {
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-}
-
-/* --- 11. 辅助功能支持 --- */
 .thinking-header:focus,
-.toggle-thought:focus {
+.toggle-thought:focus,
+#history-toggle-btn:focus,
+button:focus {
     outline: 2px solid var(--accent-color);
     outline-offset: 2px;
 }
 
-/* .timer[aria-live="polite"] { 为屏幕阅读器提供实时更新 } */
-
-/* --- 12. 性能优化 --- */
 .thought-process,
 .final-answer {
     contain: layout style;
-    will-change: auto;
 }
 
-/* 减少重绘 */
 .message.assistant {
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-content);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-secondary);
 }

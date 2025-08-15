@@ -1,7 +1,144 @@
-// public/script.js (iOS 14.4 兼容版 - 轮询机制 + 读秒功能)
-document.addEventListener("DOMContentLoaded", () => {
-  // --- 状态管理 (State Management) ---
-  let state = {
+// script.js (iOS 14.4 深度优化版 - 解决性能瓶颈和UI遮挡问题)
+(function() {
+'use strict';
+
+// === iOS 14.4 关键修复和优化 ===
+
+// 1. 提前声明全局变量，减少作用域查找
+let globalState = null;
+let domElements = {};
+let apiConfig = {
+  requestQueue: [],
+  maxConcurrentRequests: 2, // iOS 14.4限制并发
+  activeRequests: 0
+};
+
+// 2. iOS 14.4 兼容性修复函数
+function applyiOS14Fixes() {
+  // 修复Chrome顶部横幅遮挡问题
+  const viewport = document.querySelector('meta[name="viewport"]');
+  if (viewport) {
+    viewport.setAttribute('content', 'width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no');
+  }
+
+  // 添加安全区域CSS变量
+  document.documentElement.style.setProperty('--safe-area-inset-top', 'env(safe-area-inset-top, 0px)');
+  document.documentElement.style.setProperty('--safe-area-inset-bottom', 'env(safe-area-inset-bottom, 0px)');
+  
+  // iOS 14.4 flexbox修复
+  const style = document.createElement('style');
+  style.textContent = `
+    .header { padding-top: max(12px, env(safe-area-inset-top)) !important; }
+    .chat-container { height: calc(100vh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important; }
+    .main-container { display: -webkit-box !important; display: -webkit-flex !important; }
+  `;
+  document.head.appendChild(style);
+}
+
+// 3. 内存管理优化
+function optimizeMemoryUsage() {
+  // 限制消息历史长度
+  const MAX_MESSAGES = 100;
+  
+  // 定期清理DOM
+  setInterval(() => {
+    // 清理过多的聊天消息
+    const messages = document.querySelectorAll('.message');
+    if (messages.length > MAX_MESSAGES) {
+      const toRemove = messages.length - MAX_MESSAGES;
+      for (let i = 0; i < toRemove; i++) {
+        messages[i].remove();
+      }
+    }
+    
+    // 强制垃圾回收提示
+    if (window.gc) window.gc();
+  }, 60000); // 每分钟清理一次
+}
+
+// 4. 事件处理优化 - 使用事件委托
+function setupOptimizedEventHandlers() {
+  // 统一事件处理器
+  document.addEventListener('click', function(e) {
+    const target = e.target;
+    const closest = target.closest.bind(target);
+    
+    // 新建对话
+    if (closest('#new-chat-btn')) {
+      e.preventDefault();
+      createNewSession();
+      return;
+    }
+    
+    // 会话列表项
+    if (closest('#session-list li')) {
+      const sessionId = closest('#session-list li').dataset.sessionId;
+      if (sessionId) loadSessionMessages(sessionId);
+      return;
+    }
+    
+    // 历史记录切换
+    if (closest('#history-toggle-btn')) {
+      toggleHistoryDrawer();
+      return;
+    }
+    
+    // 登出
+    if (closest('#logout-btn')) {
+      handleLogout();
+      return;
+    }
+    
+    // 思考过程切换
+    if (closest('.thinking-header')) {
+      const wrapper = closest('.message').querySelector('.thought-wrapper');
+      const arrow = closest('.thinking-header').querySelector('.arrow');
+      if (wrapper && arrow) {
+        wrapper.classList.toggle('collapsed');
+        arrow.classList.toggle('down');
+      }
+      return;
+    }
+    
+    // 抽屉遮罩
+    if (closest('#drawer-overlay')) {
+      closeHistoryDrawer();
+      return;
+    }
+    
+    // 认证模式切换
+    if (closest('#switch-auth-mode')) {
+      e.preventDefault();
+      toggleAuthMode();
+      return;
+    }
+  }, { passive: false });
+  
+  // 表单提交优化
+  document.addEventListener('submit', function(e) {
+    if (e.target.id === 'auth-form') {
+      e.preventDefault();
+      handleAuthSubmit();
+    } else if (e.target.id === 'chat-form') {
+      e.preventDefault();
+      handleChatSubmit();
+    }
+  }, { passive: false });
+  
+  // 输入优化
+  document.addEventListener('input', function(e) {
+    if (e.target.id === 'user-input') {
+      const btn = domElements.sendButton;
+      if (btn) {
+        btn.disabled = !e.target.value.trim();
+      }
+    }
+  }, { passive: true });
+}
+
+// === 核心状态管理 ===
+function initializeState() {
+  globalState = {
     sessions: [],
     activeSessionId: null,
     token: localStorage.getItem("accessToken"),
@@ -9,608 +146,821 @@ document.addEventListener("DOMContentLoaded", () => {
     isRegisterMode: false,
     currentMessages: [],
     apiProviders: [],
+    isLoading: false,
+    requestController: null
   };
+}
 
-  // --- DOM 元素选择器 (DOM Element Selectors) ---
-  const appContainer = document.getElementById("app-container");
-  const authContainer = document.getElementById("auth-container");
-  const authForm = document.getElementById("auth-form");
-  const authTitle = document.getElementById("auth-title");
-  const authUsername = document.getElementById("auth-username");
-  const authPassword = document.getElementById("auth-password");
-  const authSubmitBtn = document.getElementById("auth-submit-btn");
-  const switchAuthModeBtn = document.getElementById("switch-auth-mode");
-  const authMessage = document.getElementById("auth-message");
-  const newChatBtn = document.getElementById("new-chat-btn");
-  const sessionList = document.getElementById("session-list");
-  const chatForm = document.getElementById("chat-form");
-  const userInput = document.getElementById("user-input");
-  const chatBox = document.getElementById("chat-box");
-  const modelSelect = document.getElementById("model-select");
-  const usernameDisplay = document.getElementById("username-display");
-  const logoutBtn = document.getElementById("logout-btn");
-  const historyToggleBtn = document.getElementById("history-toggle-btn");
-  const historyDrawer = document.getElementById("history-drawer");
-  const drawerOverlay = document.getElementById("drawer-overlay");
-  const sendButton = chatForm.querySelector("button[type=submit]");
+// === DOM 元素缓存 ===
+function cacheDOMElements() {
+  const elements = [
+    'app-container', 'auth-container', 'auth-form', 'auth-title',
+    'auth-username', 'auth-password', 'auth-submit-btn', 'switch-auth-mode',
+    'auth-message', 'new-chat-btn', 'session-list', 'chat-form',
+    'user-input', 'chat-box', 'model-select', 'username-display',
+    'logout-btn', 'history-toggle-btn', 'history-drawer', 'drawer-overlay'
+  ];
+  
+  elements.forEach(id => {
+    domElements[id] = document.getElementById(id);
+  });
+  
+  domElements.sendButton = domElements.chatForm?.querySelector('button[type=submit]');
+}
 
-  // --- 依赖库配置 (Library Configuration) ---
-  marked.setOptions({
-    highlight: function(code, lang) {
-      const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
-      try {
-        return hljs.highlight(code, {
-          language: language,
-          ignoreIllegals: true
-        }).value;
-      } catch (e) {
+// === 库配置优化 ===
+function configureLibraries() {
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      highlight: function(code, lang) {
+        if (typeof hljs === 'undefined') return code;
+        
+        const language = lang && hljs.getLanguage(lang) ? lang : "plaintext";
         try {
-          return hljs.highlightAuto(code).value;
+          return hljs.highlight(code, { language, ignoreIllegals: true }).value;
         } catch (e) {
-          return code;
-        }
-      }
-    },
-  });
-
-  // --- 认证相关功能 (Authentication Functions) ---
-  function toggleAuthModeUI() {
-    authMessage.textContent = "";
-    if (state.isRegisterMode) {
-      authTitle.textContent = "注册";
-      authSubmitBtn.textContent = "注册";
-      switchAuthModeBtn.textContent = "已有账号？点击登录";
-    } else {
-      authTitle.textContent = "登录";
-      authSubmitBtn.textContent = "登录";
-      switchAuthModeBtn.textContent = "没有账号？点击注册";
-    }
-  }
-  switchAuthModeBtn.addEventListener("click", (event) => {
-    event.preventDefault();
-    state.isRegisterMode = !state.isRegisterMode;
-    toggleAuthModeUI();
-  });
-  authForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const username = authUsername.value;
-    const password = authPassword.value;
-    const endpoint = state.isRegisterMode ? "/api/auth/register" : "/api/auth/login";
-    try {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          username,
-          password
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.message || "操作失败");
-      }
-      if (state.isRegisterMode) {
-        state.isRegisterMode = false;
-        toggleAuthModeUI();
-        authMessage.style.color = "#0E9F6E";
-        authMessage.textContent = "注册成功！请登录。";
-      } else {
-        state.token = data.accessToken;
-        state.username = data.username;
-        localStorage.setItem("accessToken", state.token);
-        localStorage.setItem("username", state.username);
-        initializeApp();
-      }
-    } catch (error) {
-      authMessage.style.color = "#F05252";
-      authMessage.textContent = error.message;
-    }
-  });
-  logoutBtn.addEventListener("click", function() {
-    state.token = null;
-    state.username = null;
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("username");
-    localStorage.removeItem("lastActiveSessionId");
-    toggleAuthViews(false);
-  });
-  function toggleAuthViews(isLoggedIn) {
-    if (isLoggedIn) {
-      appContainer.classList.remove("hidden");
-      authContainer.classList.add("hidden");
-      usernameDisplay.textContent = state.username;
-    } else {
-      appContainer.classList.add("hidden");
-      authContainer.classList.remove("hidden");
-    }
-  }
-
-  // --- 侧边栏与会话管理 (Sidebar & Session Management) ---
-  historyToggleBtn.addEventListener("click", () => {
-    historyDrawer.classList.toggle("open");
-    drawerOverlay.classList.toggle("visible");
-  });
-  drawerOverlay.addEventListener("click", () => {
-    historyDrawer.classList.remove("open");
-    drawerOverlay.classList.remove("visible");
-  });
-
-  async function apiRequest(url, options = {}) {
-    const defaultHeaders = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    };
-    if (state.token) {
-      defaultHeaders["x-access-token"] = state.token;
-    }
-
-    const response = await fetch(url, {
-      ...options,
-      headers: defaultHeaders,
-    });
-    if (response.status === 401) {
-      logoutBtn.click();
-      return Promise.reject(new Error("登录已过期，请重新登录。"));
-    }
-    const text = await response.text();
-    let data;
-    try {
-      data = text ? JSON.parse(text) : {};
-    } catch (e) {
-      console.error("JSON parsing error:", e, "for response text:", text);
-      data = {
-        error: "Invalid response from server",
-        _raw: text
-      };
-    }
-
-    if (!response.ok) {
-      throw new Error(data.message || data.error || "请求失败");
-    }
-    return data;
-  }
-
-  async function loadSessions() {
-    try {
-      const sessions = await apiRequest("/api/sessions");
-      state.sessions = sessions;
-      renderSessions();
-      if (state.sessions && state.sessions.length > 0) {
-        const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
-        const sessionExists = state.sessions.some(s => s.id === lastActiveSessionId);
-        const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : state.sessions[0].id;
-        await loadSessionMessages(activeSessionId);
-      } else {
-        await createNewSession();
-      }
-    } catch (error) {
-      console.error("加载对话列表失败:", error);
-    }
-  }
-
-  async function createNewSession() {
-    try {
-      const newSession = await apiRequest("/api/sessions", {
-        method: "POST"
-      });
-      state.sessions.unshift(newSession);
-      await loadSessionMessages(newSession.id);
-    } catch (error) {
-      console.error("创建新对话失败:", error);
-    }
-  }
-  newChatBtn.addEventListener("click", createNewSession);
-
-  async function loadSessionMessages(sessionId) {
-    historyDrawer.classList.remove("open");
-    drawerOverlay.classList.remove("visible");
-    state.activeSessionId = sessionId;
-    localStorage.setItem("lastActiveSessionId", sessionId);
-    renderSessions();
-    try {
-      state.currentMessages = await apiRequest(`/api/sessions/${sessionId}/messages`);
-      renderMessages();
-      userInput.focus();
-    } catch (error) {
-      console.error(`加载对话 [${sessionId}] 失败:`, error);
-      chatBox.innerHTML = `<div class="message assistant" style="color:red">加载消息失败: ${error.message}</div>`;
-    }
-  }
-
-  function renderSessions() {
-    sessionList.innerHTML = "";
-    if (!state.sessions || !Array.isArray(state.sessions)) return;
-    state.sessions.forEach((session) => {
-      const listItem = document.createElement("li");
-      const titleSpan = document.createElement("span");
-      titleSpan.classList.add("session-title");
-      titleSpan.textContent = session.title;
-      const timeSpan = document.createElement("span");
-      timeSpan.classList.add("session-time");
-      const date = new Date(session.created_at);
-      timeSpan.textContent = date
-        .toLocaleString("zh-CN", {
-          timeZone: "Asia/Shanghai",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        })
-        .replace(/\//g, "-");
-      listItem.appendChild(titleSpan);
-      listItem.appendChild(timeSpan);
-      listItem.dataset.sessionId = session.id;
-      if (session.id === state.activeSessionId) {
-        listItem.classList.add("active");
-      }
-      listItem.addEventListener("click", () => loadSessionMessages(session.id));
-      sessionList.appendChild(listItem);
-    });
-  }
-
-  // --- 消息渲染 (Message Rendering) ---
-  function renderMessages() {
-    chatBox.innerHTML = "";
-    if (state.currentMessages) {
-      state.currentMessages
-        .filter((msg) => msg.role !== "system")
-        .forEach((msg) => {
           try {
-            const parsedContent = JSON.parse(msg.content);
-            if (parsedContent && typeof parsedContent === 'object' && 'answer' in parsedContent) {
-              renderThinkingMessage(parsedContent);
-            } else {
-              renderSimpleMessage(msg.content, msg.role);
-            }
+            return hljs.highlightAuto(code).value;
           } catch (e) {
-            renderSimpleMessage(msg.content, msg.role);
+            return code;
           }
-        });
-    }
-    chatBox.scrollTop = chatBox.scrollHeight;
-  }
-
-  function renderSimpleMessage(content, role) {
-    const messageDiv = document.createElement("div");
-    messageDiv.classList.add("message", role);
-    const markdownContent = String(content);
-    messageDiv.innerHTML = marked.parse(markdownContent);
-    chatBox.appendChild(messageDiv);
-    chatBox.scrollTop = chatBox.scrollHeight;
-    messageDiv.querySelectorAll('pre code').forEach((block) => {
-      hljs.highlightElement(block);
+        }
+      },
+      breaks: true,
+      gfm: true
     });
-    return messageDiv;
+  }
+}
+
+// === 认证功能 ===
+function toggleAuthMode() {
+  globalState.isRegisterMode = !globalState.isRegisterMode;
+  updateAuthUI();
+}
+
+function updateAuthUI() {
+  if (!domElements.authTitle) return;
+  
+  domElements.authMessage.textContent = "";
+  
+  if (globalState.isRegisterMode) {
+    domElements.authTitle.textContent = "注册";
+    domElements.authSubmitBtn.textContent = "注册";
+    domElements.switchAuthModeBtn.textContent = "已有账号？点击登录";
+  } else {
+    domElements.authTitle.textContent = "登录";
+    domElements.authSubmitBtn.textContent = "登录";
+    domElements.switchAuthModeBtn.textContent = "没有账号？点击注册";
+  }
+}
+
+async function handleAuthSubmit() {
+  if (globalState.isLoading) return;
+  
+  const username = domElements.authUsername.value.trim();
+  const password = domElements.authPassword.value.trim();
+  
+  if (!username || !password || password.length < 6) {
+    showAuthMessage("用户名或密码格式不正确", "error");
+    return;
   }
   
-  function renderThinkingMessage(data) {
-    const messageDiv = document.createElement("div");
-    messageDiv.className = "message assistant";
+  globalState.isLoading = true;
+  domElements.authSubmitBtn.disabled = true;
+  domElements.authSubmitBtn.textContent = "处理中...";
+  
+  try {
+    const endpoint = globalState.isRegisterMode ? "/api/auth/register" : "/api/auth/login";
+    const response = await fetchWithTimeout(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password })
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok) {
+      throw new Error(data.message || "操作失败");
+    }
+    
+    if (globalState.isRegisterMode) {
+      globalState.isRegisterMode = false;
+      updateAuthUI();
+      showAuthMessage("注册成功！请登录。", "success");
+    } else {
+      globalState.token = data.accessToken;
+      globalState.username = data.username;
+      localStorage.setItem("accessToken", globalState.token);
+      localStorage.setItem("username", globalState.username);
+      await initializeApp();
+    }
+  } catch (error) {
+    showAuthMessage(error.message, "error");
+  } finally {
+    globalState.isLoading = false;
+    domElements.authSubmitBtn.disabled = false;
+    domElements.authSubmitBtn.textContent = globalState.isRegisterMode ? "注册" : "登录";
+  }
+}
 
-    const thoughtBlock = (data.thought && data.thought.trim() !== '') ? `
+function showAuthMessage(message, type) {
+  if (!domElements.authMessage) return;
+  
+  domElements.authMessage.style.color = type === "error" ? "#F05252" : "#0E9F6E";
+  domElements.authMessage.textContent = message;
+  
+  setTimeout(() => {
+    if (domElements.authMessage) {
+      domElements.authMessage.textContent = "";
+    }
+  }, 5000);
+}
+
+function handleLogout() {
+  globalState.token = null;
+  globalState.username = null;
+  localStorage.removeItem("accessToken");
+  localStorage.removeItem("username");
+  localStorage.removeItem("lastActiveSessionId");
+  toggleAuthViews(false);
+}
+
+function toggleAuthViews(isLoggedIn) {
+  if (!domElements.appContainer || !domElements.authContainer) return;
+  
+  if (isLoggedIn) {
+    domElements.appContainer.classList.remove("hidden");
+    domElements.authContainer.classList.add("hidden");
+    if (domElements.usernameDisplay) {
+      domElements.usernameDisplay.textContent = globalState.username;
+    }
+  } else {
+    domElements.appContainer.classList.add("hidden");
+    domElements.authContainer.classList.remove("hidden");
+  }
+}
+
+// === 侧边栏管理 ===
+function toggleHistoryDrawer() {
+  if (!domElements.historyDrawer || !domElements.drawerOverlay) return;
+  
+  domElements.historyDrawer.classList.toggle("open");
+  domElements.drawerOverlay.classList.toggle("visible");
+}
+
+function closeHistoryDrawer() {
+  if (!domElements.historyDrawer || !domElements.drawerOverlay) return;
+  
+  domElements.historyDrawer.classList.remove("open");
+  domElements.drawerOverlay.classList.remove("visible");
+}
+
+// === 网络请求优化 ===
+function fetchWithTimeout(url, options = {}, timeout = 30000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  const defaultHeaders = {
+    "Content-Type": "application/json",
+    ...options.headers,
+  };
+  
+  if (globalState.token) {
+    defaultHeaders["x-access-token"] = globalState.token;
+  }
+  
+  return fetch(url, {
+    ...options,
+    headers: defaultHeaders,
+    signal: controller.signal
+  }).then(response => {
+    clearTimeout(timeoutId);
+    
+    if (response.status === 401) {
+      handleLogout();
+      throw new Error("登录已过期，请重新登录。");
+    }
+    
+    return response;
+  }).catch(error => {
+    clearTimeout(timeoutId);
+    throw error;
+  });
+}
+
+// === 会话管理 ===
+async function loadSessions() {
+  try {
+    const response = await fetchWithTimeout("/api/sessions");
+    const sessions = await response.json();
+    
+    globalState.sessions = sessions;
+    renderSessions();
+    
+    if (sessions && sessions.length > 0) {
+      const lastActiveSessionId = localStorage.getItem("lastActiveSessionId");
+      const sessionExists = sessions.some(s => s.id === lastActiveSessionId);
+      const activeSessionId = (lastActiveSessionId && sessionExists) ? lastActiveSessionId : sessions[0].id;
+      await loadSessionMessages(activeSessionId);
+    } else {
+      await createNewSession();
+    }
+  } catch (error) {
+    console.error("加载对话列表失败:", error);
+  }
+}
+
+async function createNewSession() {
+  if (globalState.isLoading) return;
+  
+  try {
+    globalState.isLoading = true;
+    const response = await fetchWithTimeout("/api/sessions", { method: "POST" });
+    const newSession = await response.json();
+    
+    globalState.sessions.unshift(newSession);
+    await loadSessionMessages(newSession.id);
+  } catch (error) {
+    console.error("创建新对话失败:", error);
+  } finally {
+    globalState.isLoading = false;
+  }
+}
+
+async function loadSessionMessages(sessionId) {
+  closeHistoryDrawer();
+  
+  globalState.activeSessionId = sessionId;
+  localStorage.setItem("lastActiveSessionId", sessionId);
+  renderSessions();
+  
+  try {
+    const response = await fetchWithTimeout(`/api/sessions/${sessionId}/messages`);
+    globalState.currentMessages = await response.json();
+    renderMessages();
+    
+    if (domElements.userInput) {
+      domElements.userInput.focus();
+    }
+  } catch (error) {
+    console.error(`加载对话 [${sessionId}] 失败:`, error);
+    if (domElements.chatBox) {
+      domElements.chatBox.innerHTML = `<div class="message assistant" style="color:red">加载消息失败: ${error.message}</div>`;
+    }
+  }
+}
+
+function renderSessions() {
+  if (!domElements.sessionList || !globalState.sessions) return;
+  
+  const fragment = document.createDocumentFragment();
+  
+  globalState.sessions.forEach((session) => {
+    const listItem = document.createElement("li");
+    listItem.dataset.sessionId = session.id;
+    
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "session-title";
+    titleSpan.textContent = session.title;
+    
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "session-time";
+    const date = new Date(session.created_at);
+    timeSpan.textContent = date.toLocaleString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).replace(/\//g, "-");
+    
+    if (session.id === globalState.activeSessionId) {
+      listItem.classList.add("active");
+    }
+    
+    listItem.appendChild(titleSpan);
+    listItem.appendChild(timeSpan);
+    fragment.appendChild(listItem);
+  });
+  
+  domElements.sessionList.innerHTML = "";
+  domElements.sessionList.appendChild(fragment);
+}
+
+// === 消息渲染优化 ===
+function renderMessages() {
+  if (!domElements.chatBox) return;
+  
+  domElements.chatBox.innerHTML = "";
+  
+  if (globalState.currentMessages) {
+    const fragment = document.createDocumentFragment();
+    
+    globalState.currentMessages
+      .filter((msg) => msg.role !== "system")
+      .forEach((msg) => {
+        try {
+          const parsedContent = JSON.parse(msg.content);
+          if (parsedContent && typeof parsedContent === 'object' && 'answer' in parsedContent) {
+            fragment.appendChild(createThinkingMessage(parsedContent));
+          } else {
+            fragment.appendChild(createSimpleMessage(msg.content, msg.role));
+          }
+        } catch (e) {
+          fragment.appendChild(createSimpleMessage(msg.content, msg.role));
+        }
+      });
+    
+    domElements.chatBox.appendChild(fragment);
+  }
+  
+  scrollToBottom();
+}
+
+function createSimpleMessage(content, role) {
+  const messageDiv = document.createElement("div");
+  messageDiv.className = `message ${role}`;
+  
+  if (typeof marked !== 'undefined') {
+    messageDiv.innerHTML = marked.parse(String(content));
+  } else {
+    messageDiv.textContent = content;
+  }
+  
+  // 延迟代码高亮，避免阻塞主线程
+  requestAnimationFrame(() => {
+    if (typeof hljs !== 'undefined') {
+      messageDiv.querySelectorAll('pre code').forEach((block) => {
+        hljs.highlightElement(block);
+      });
+    }
+  });
+  
+  return messageDiv;
+}
+
+function createThinkingMessage(data) {
+  const messageDiv = document.createElement("div");
+  messageDiv.className = "message assistant";
+
+  const thoughtBlock = (data.thought && data.thought.trim() !== '') ? `
+    <div class="thinking-header">
+        <span class="timer">思考过程 ${data.duration ? `(${data.duration}秒)` : ''}</span>
+        <span class="toggle-thought">
+            <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </span>
+    </div>
+    <div class="thought-wrapper collapsed">
+        <div class="thought-process"></div>
+    </div>
+  ` : '';
+
+  messageDiv.innerHTML = `
+    ${thoughtBlock}
+    <div class="final-answer"></div>
+  `;
+
+  // 延迟渲染内容
+  requestAnimationFrame(() => {
+    if (data.thought && data.thought.trim() !== '' && typeof marked !== 'undefined') {
+      const thoughtDiv = messageDiv.querySelector(".thought-process");
+      if (thoughtDiv) {
+        thoughtDiv.innerHTML = marked.parse(data.thought);
+      }
+    }
+    
+    const answerDiv = messageDiv.querySelector(".final-answer");
+    if (answerDiv && typeof marked !== 'undefined') {
+      answerDiv.innerHTML = marked.parse(data.answer);
+    }
+    
+    // 代码高亮
+    if (typeof hljs !== 'undefined') {
+      messageDiv.querySelectorAll('pre code').forEach((block) => {
+        hljs.highlightElement(block);
+      });
+    }
+  });
+
+  return messageDiv;
+}
+
+function scrollToBottom() {
+  if (domElements.chatBox) {
+    domElements.chatBox.scrollTop = domElements.chatBox.scrollHeight;
+  }
+}
+
+// === API 提供商管理 ===
+async function loadApiProviders() {
+  try {
+    const response = await fetchWithTimeout("/api/providers");
+    const providers = await response.json();
+    
+    globalState.apiProviders = providers;
+    
+    if (domElements.modelSelect) {
+      domElements.modelSelect.innerHTML = "";
+      
+      providers.forEach((provider, index) => {
+        const option = document.createElement("option");
+        option.value = provider.id;
+        option.textContent = provider.name;
+        if (index === 0) option.selected = true;
+        domElements.modelSelect.appendChild(option);
+      });
+    }
+  } catch (error) {
+    console.error("加载 API 列表失败:", error);
+    if (domElements.modelSelect) {
+      domElements.modelSelect.innerHTML = "<option>加载失败</option>";
+    }
+  }
+}
+
+// === 聊天功能优化 ===
+async function handleChatSubmit() {
+  if (globalState.isLoading) return;
+  
+  const message = domElements.userInput.value.trim();
+  if (!message || !globalState.activeSessionId) return;
+
+  globalState.isLoading = true;
+  domElements.sendButton.disabled = true;
+  
+  const userMessage = { role: "user", content: message };
+  globalState.currentMessages.push(userMessage);
+  renderMessages();
+  
+  domElements.userInput.value = "";
+  domElements.userInput.focus();
+
+  try {
+    // 保存用户消息
+    await fetchWithTimeout(`/api/sessions/${globalState.activeSessionId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(userMessage)
+    });
+
+    const apiId = domElements.modelSelect.value;
+    await handleStreamingChat(apiId, message);
+  } catch (error) {
+    console.error("发送消息失败:", error);
+    showChatError(error.message);
+  } finally {
+    globalState.isLoading = false;
+    domElements.sendButton.disabled = false;
+  }
+}
+
+async function handleStreamingChat(apiId, userMessage) {
+  const startTime = Date.now();
+  
+  // 创建AI回复容器
+  const assistantMessageDiv = document.createElement("div");
+  assistantMessageDiv.className = "message assistant";
+  domElements.chatBox.appendChild(assistantMessageDiv);
+
+  // 状态变量
+  let currentThought = "";
+  let currentAnswer = "";
+  let timerElement = null;
+  let timerInterval = null;
+
+  // 创建初始UI
+  function createInitialUI() {
+    assistantMessageDiv.innerHTML = `
       <div class="thinking-header">
-          <span class="timer">思考过程 ${data.duration ? `(${data.duration}秒)` : ''}</span>
+          <span class="timer">思考中 0.0 秒</span>
           <span class="toggle-thought">
               <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
           </span>
       </div>
       <div class="thought-wrapper collapsed">
-          <div class="thought-process">${marked.parse(data.thought)}</div>
+          <div class="thought-process"></div>
       </div>
-    ` : '';
-
-    messageDiv.innerHTML = `
-      ${thoughtBlock}
-      <div class="final-answer">${marked.parse(data.answer)}</div>
+      <div class="final-answer"></div>
     `;
-
-    chatBox.appendChild(messageDiv);
-
-    if (data.thought && data.thought.trim() !== '') {
-      const header = messageDiv.querySelector(".thinking-header");
-      const thoughtWrapper = messageDiv.querySelector(".thought-wrapper");
-      header.addEventListener("click", () => {
-        thoughtWrapper.classList.toggle("collapsed");
-        header.querySelector(".arrow").classList.toggle("down");
-      });
-    }
-
-    messageDiv.querySelectorAll('pre code').forEach((block) => {
-      hljs.highlightElement(block);
-    });
-    chatBox.scrollTop = chatBox.scrollHeight;
-    return messageDiv;
-  }
-
-  // --- 打字机效果函数 ---
-  function typewriterEffect(element, text, speed = 30) {
-    return new Promise((resolve) => {
-      let index = 0;
-      element.innerHTML = '';
-      const timer = setInterval(() => {
-        if (index < text.length) {
-          element.innerHTML += text.charAt(index);
-          index++;
-        } else {
-          clearInterval(timer);
-          resolve();
-        }
-      }, speed);
-    });
-  }
-
-  // --- 聊天与 API 交互 (Chat & API Interaction) ---
-  async function loadApiProviders() {
-    try {
-      const providers = await apiRequest("/api/providers");
-      state.apiProviders = providers;
-      modelSelect.innerHTML = "";
-      providers.forEach((provider, index) => {
-        const option = document.createElement("option");
-        option.value = provider.id;
-        option.textContent = provider.name;
-        if (index === 0) {
-          option.selected = true;
-        }
-        modelSelect.appendChild(option);
-      });
-    } catch (error) {
-      console.error("加载 API 列表失败:", error);
-      modelSelect.innerHTML = "<option>加载失败</option>";
-    }
-  }
-
-  userInput.addEventListener("input", () => {
-    sendButton.disabled = !userInput.value.trim();
-  });
-
-  chatForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const message = userInput.value.trim();
-    if (!message || !state.activeSessionId) return;
-
-    sendButton.disabled = true;
-    const userMessage = {
-      role: "user",
-      content: message
-    };
-    state.currentMessages.push(userMessage);
-    renderMessages();
-    userInput.value = "";
-    userInput.focus();
-
-    await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
-      method: "POST",
-      body: JSON.stringify(userMessage),
-    });
-
-    const apiId = modelSelect.value;
-    await handleStreamingChat(apiId, message);
-    sendButton.disabled = false;
-  });
-
-  async function handleStreamingChat(apiId, userMessage) {
-    const startTime = Date.now();
     
-    // 创建 AI 回复容器
-    const assistantMessageDiv = document.createElement("div");
-    assistantMessageDiv.className = "message assistant";
-    chatBox.appendChild(assistantMessageDiv);
+    timerElement = assistantMessageDiv.querySelector(".timer");
+  }
 
-    // 初始化状态变量
-    let currentThought = "";
-    let currentAnswer = "";
-    let timerElement = null;
-    let timerInterval = null;
-
-    // 创建初始 UI 结构
-    function createInitialUI() {
-      assistantMessageDiv.innerHTML = `
-        <div class="thinking-header">
-            <span class="timer">思考中 0.0 秒</span>
-            <span class="toggle-thought">
-                <svg class="arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-            </span>
-        </div>
-        <div class="thought-wrapper collapsed">
-            <div class="thought-process"></div>
-        </div>
-        <div class="final-answer"></div>
-      `;
-      
-      timerElement = assistantMessageDiv.querySelector(".timer");
-      
-      // 绑定折叠/展开事件
-      const header = assistantMessageDiv.querySelector(".thinking-header");
-      const thoughtWrapper = assistantMessageDiv.querySelector(".thought-wrapper");
-      header.addEventListener("click", () => {
-        thoughtWrapper.classList.toggle("collapsed");
-        header.querySelector(".arrow").classList.toggle("down");
-      });
-    }
-
-    // 启动计时器
-    function startTimer() {
-      timerInterval = setInterval(() => {
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        if (timerElement) {
-          timerElement.textContent = `思考中 ${elapsed} 秒`;
-        }
-      }, 100);
-    }
-
-    // 停止计时器并显示最终时间
-    function stopTimer() {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-      const finalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+  // 启动计时器
+  function startTimer() {
+    timerInterval = setInterval(() => {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       if (timerElement) {
-        timerElement.textContent = `思考了 ${finalTime} 秒`;
+        timerElement.textContent = `思考中 ${elapsed} 秒`;
       }
-      return finalTime;
-    }
+    }, 100);
+  }
 
-    // 渐进式渲染内容（模拟打字机效果）
-    function renderStreamingContent(thought, answer) {
-      const thoughtElement = assistantMessageDiv.querySelector(".thought-process");
-      const answerElement = assistantMessageDiv.querySelector(".final-answer");
-      
-      if (thought !== currentThought) {
-        currentThought = thought;
-        if (thoughtElement && thought.trim()) {
-          thoughtElement.innerHTML = marked.parse(thought);
+  // 停止计时器
+  function stopTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+    const finalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    if (timerElement) {
+      timerElement.textContent = `思考了 ${finalTime} 秒`;
+    }
+    return finalTime;
+  }
+
+  // 渲染流式内容
+  function renderStreamingContent(thought, answer) {
+    const thoughtElement = assistantMessageDiv.querySelector(".thought-process");
+    const answerElement = assistantMessageDiv.querySelector(".final-answer");
+    
+    if (thought !== currentThought) {
+      currentThought = thought;
+      if (thoughtElement && thought.trim() && typeof marked !== 'undefined') {
+        thoughtElement.innerHTML = marked.parse(thought);
+        if (typeof hljs !== 'undefined') {
           thoughtElement.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
         }
       }
-      
-      if (answer !== currentAnswer) {
-        currentAnswer = answer;
-        if (answerElement) {
-          answerElement.innerHTML = marked.parse(answer + "▋"); // 添加光标效果
+    }
+    
+    if (answer !== currentAnswer) {
+      currentAnswer = answer;
+      if (answerElement && typeof marked !== 'undefined') {
+        answerElement.innerHTML = marked.parse(answer + "▋");
+        if (typeof hljs !== 'undefined') {
           answerElement.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
         }
       }
-      
-      chatBox.scrollTop = chatBox.scrollHeight;
     }
+    
+    scrollToBottom();
+  }
 
-    // 完成渲染
-    function finalizeContent() {
-      const answerElement = assistantMessageDiv.querySelector(".final-answer");
-      if (answerElement) {
-        answerElement.innerHTML = marked.parse(currentAnswer); // 移除光标
+  // 完成渲染
+  function finalizeContent() {
+    const answerElement = assistantMessageDiv.querySelector(".final-answer");
+    if (answerElement && typeof marked !== 'undefined') {
+      answerElement.innerHTML = marked.parse(currentAnswer);
+      if (typeof hljs !== 'undefined') {
         answerElement.querySelectorAll('pre code').forEach(block => hljs.highlightElement(block));
       }
     }
+  }
+
+  try {
+    createInitialUI();
+    startTimer();
+
+    // 发起聊天请求
+    const requestResponse = await fetchWithTimeout("/api/chat-request", {
+      method: "POST",
+      body: JSON.stringify({
+        messages: globalState.currentMessages,
+        apiId: apiId
+      })
+    });
+
+    const requestData = await requestResponse.json();
+    
+    if (!requestData.taskId) {
+      throw new Error("未能获取有效的任务ID");
+    }
+
+    const { taskId } = requestData;
+
+    // 轮询获取结果 - iOS 14.4 优化间隔
+    await new Promise((resolve, reject) => {
+      let pollCount = 0;
+      const maxPolls = 300; // 最多轮询5分钟
+      
+      const pollInterval = setInterval(async () => {
+        try {
+          pollCount++;
+          
+          if (pollCount > maxPolls) {
+            clearInterval(pollInterval);
+            return reject(new Error("请求超时"));
+          }
+
+          const pollResponse = await fetchWithTimeout(`/api/chat-poll/${taskId}`, {}, 10000);
+          const pollData = await pollResponse.json();
+          
+          if (pollData.error) {
+            clearInterval(pollInterval);
+            return reject(new Error(pollData.error));
+          }
+
+          // 更新内容
+          renderStreamingContent(
+            pollData.fullThought || "", 
+            pollData.fullAnswer || ""
+          );
+
+          // 检查是否完成
+          if (pollData.done) {
+            clearInterval(pollInterval);
+            resolve();
+          }
+        } catch (error) {
+          clearInterval(pollInterval);
+          reject(error);
+        }
+      }, 250); // 250ms轮询间隔，平衡性能和体验
+    });
+
+  } catch (error) {
+    console.error("聊天请求错误:", error);
+    assistantMessageDiv.innerHTML = `
+      <div class="final-answer">
+        <span style="color: red;">请求处理错误: ${error.message}</span>
+      </div>
+    `;
+    return;
+  } finally {
+    const duration = stopTimer();
+    finalizeContent();
+
+    // 保存消息到数据库
+    const messageData = {
+      thought: currentThought,
+      answer: currentAnswer,
+      duration: duration
+    };
+
+    const finalMessage = {
+      role: "assistant",
+      content: JSON.stringify(messageData)
+    };
+    
+    globalState.currentMessages.push(finalMessage);
 
     try {
-      // 创建初始 UI 和启动计时器
-      createInitialUI();
-      startTimer();
-
-      // 发起聊天请求
-      const requestResponse = await apiRequest("/api/chat-request", {
+      await fetchWithTimeout(`/api/sessions/${globalState.activeSessionId}/messages`, {
         method: "POST",
-        body: JSON.stringify({
-          messages: state.currentMessages,
-          apiId: apiId
-        }),
+        body: JSON.stringify(finalMessage)
       });
+      await updateSessionTitle(userMessage);
+    } catch (e) {
+      console.error("保存最终消息失败:", e);
+    }
+  }
+}
 
-      if (!requestResponse.taskId) {
-        throw new Error("未能获取有效的任务ID");
+function showChatError(message) {
+  if (!domElements.chatBox) return;
+  
+  const errorDiv = document.createElement("div");
+  errorDiv.className = "message assistant";
+  errorDiv.innerHTML = `<div class="final-answer" style="color: red;">错误: ${message}</div>`;
+  domElements.chatBox.appendChild(errorDiv);
+  scrollToBottom();
+}
+
+async function updateSessionTitle(userMessage) {
+  const userMessagesCount = globalState.currentMessages.filter((msg) => msg.role === "user").length;
+  
+  if (userMessagesCount === 1) {
+    const newTitle = userMessage.substring(0, 20);
+    try {
+      await fetchWithTimeout(`/api/sessions/${globalState.activeSessionId}/title`, {
+        method: "PUT",
+        body: JSON.stringify({ title: newTitle })
+      });
+      
+      const sessionToUpdate = globalState.sessions.find((s) => s.id === globalState.activeSessionId);
+      if (sessionToUpdate) {
+        sessionToUpdate.title = newTitle;
+        renderSessions();
       }
-
-      const { taskId } = requestResponse;
-
-      // 轮询获取结果
-      await new Promise((resolve, reject) => {
-        const pollInterval = setInterval(async () => {
-          try {
-            const pollResponse = await apiRequest(`/api/chat-poll/${taskId}`);
-            
-            if (pollResponse.error) {
-              clearInterval(pollInterval);
-              return reject(new Error(pollResponse.error));
-            }
-
-            // 更新内容
-            renderStreamingContent(
-              pollResponse.fullThought || "", 
-              pollResponse.fullAnswer || ""
-            );
-
-            // 检查是否完成
-            if (pollResponse.done) {
-              clearInterval(pollInterval);
-              resolve();
-            }
-          } catch (error) {
-            clearInterval(pollInterval);
-            reject(error);
-          }
-        }, 200); // 200ms 轮询间隔，确保流畅体验
-      });
-
     } catch (error) {
-      console.error("聊天请求错误:", error);
-      assistantMessageDiv.innerHTML = `
-        <div class="final-answer">
-          <span style="color: red;">请求处理错误: ${error.message}</span>
-        </div>
-      `;
-      return;
-    } finally {
-      // 停止计时器并完成渲染
-      const duration = stopTimer();
-      finalizeContent();
+      console.error("更新标题失败:", error);
+    }
+  }
+}
 
-      // 保存消息到数据库
-      const messageData = {
-        thought: currentThought,
-        answer: currentAnswer,
-        duration: duration
-      };
+// === 应用初始化 ===
+async function initializeApp() {
+  globalState.token = localStorage.getItem("accessToken");
+  globalState.username = localStorage.getItem("username");
 
-      const finalMessage = {
-        role: "assistant",
-        content: JSON.stringify(messageData)
-      };
-      state.currentMessages.push(finalMessage);
+  toggleAuthViews(!!globalState.token);
 
-      try {
-        await apiRequest(`/api/sessions/${state.activeSessionId}/messages`, {
-          method: "POST",
-          body: JSON.stringify(finalMessage),
-        });
-        await updateSessionTitle(userMessage);
-      } catch (e) {
-        console.error("保存最终消息失败:", e);
+  if (globalState.token) {
+    await Promise.allSettled([
+      loadApiProviders(),
+      loadSessions()
+    ]);
+    
+    if (domElements.sendButton) {
+      domElements.sendButton.disabled = true;
+    }
+  }
+}
+
+// === 主初始化函数 ===
+function initialize() {
+  try {
+    // 应用iOS 14.4修复
+    applyiOS14Fixes();
+    
+    // 初始化状态
+    initializeState();
+    
+    // 缓存DOM元素
+    cacheDOMElements();
+    
+    // 配置库
+    configureLibraries();
+    
+    // 设置优化的事件处理
+    setupOptimizedEventHandlers();
+    
+    // 内存优化
+    optimizeMemoryUsage();
+    // 初始化认证UI
+    updateAuthUI();
+
+    // 初始化应用
+    initializeApp().then(() => {
+      console.log("应用初始化完成 - iOS 14.4 优化版");
+      // 隐藏loading屏幕
+      const loadingScreen = document.getElementById('loading-screen');
+      if (loadingScreen) {
+        loadingScreen.style.opacity = '0';
       }
-    }
+      // 延迟显示主容器
+      setTimeout(() => {
+        domElements.appContainer.classList.remove("hidden");
+      }, 50);
+    }).catch((error) => {
+      console.error("初始化错误:", error);
+    });
+  } catch (error) {
+    console.error("初始化错误:", error);
   }
+}
 
-  async function updateSessionTitle(userMessage) {
-    const userMessagesCount = state.currentMessages.filter((msg) => msg.role === "user").length;
-    if (userMessagesCount === 1) {
-      const newTitle = userMessage.substring(0, 20);
-      try {
-        await apiRequest(`/api/sessions/${state.activeSessionId}/title`, {
-          method: "PUT",
-          body: JSON.stringify({
-            title: newTitle
-          }),
-        });
-        const sessionToUpdate = state.sessions.find((s) => s.id === state.activeSessionId);
-        if (sessionToUpdate) {
-          sessionToUpdate.title = newTitle;
-          renderSessions();
-        }
-      } catch (error) {
-        console.error("更新标题失败:", error);
+// 检测应用是否准备就绪
+function checkAppReady() {
+  return new Promise((resolve) => {
+    let attempts = 0;
+    const maxAttempts = 50;
+    
+    const checkInterval = setInterval(() => {
+      attempts++;
+      
+      if (domElements.userInput && domElements.sendButton && globalState.token) {
+        clearInterval(checkInterval);
+        resolve(true);
       }
-    }
+      
+      if (attempts >= maxAttempts) {
+        clearInterval(checkInterval);
+        resolve(false);
+      }
+    }, 100);
+  });
+}
+
+// DOMContentLoaded事件优化
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initialize, { once: true });
+} else {
+  setTimeout(initialize, 0);
+}
+
+// 隐藏残留的loading屏幕
+setTimeout(() => {
+  const loadingScreen = document.getElementById('loading-screen');
+  if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
+    loadingScreen.style.opacity = '0';
+    setTimeout(() => loadingScreen.remove(), 300);
   }
+}, 5000);
 
-  // --- App Initialization ---
-  async function initializeApp() {
-    state.token = localStorage.getItem("accessToken");
-    state.username = localStorage.getItem("username");
-
-    toggleAuthViews(!!state.token);
-
-    await loadApiProviders();
-
-    if (state.token) {
-      await loadSessions();
-      sendButton.disabled = true;
-    }
+// 防止内存泄漏的清理函数
+window.addEventListener('beforeunload', () => {
+  if (globalState.requestController) {
+    globalState.requestController.abort();
   }
+  
+  document.querySelectorAll('.message').forEach(msg => {
+    msg.innerHTML = '';
+  });
+  
+  globalState = null;
+  domElements = null;
+}, { passive: true });
 
-  initializeApp();
-});
+// 导出主函数
+window.zhiheAI = {
+  initialize,
+  handleChatSubmit,
+  loadSessions,
+  createNewSession,
+  toggleHistoryDrawer,
+  handleLogout
+};
+
+})();
