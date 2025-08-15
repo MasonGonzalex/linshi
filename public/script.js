@@ -863,79 +863,61 @@ async function initializeApp() {
 
 // === 主初始化函数 ===
 function initialize() {
-  try {
-    // 应用iOS 14.4修复
-    applyiOS14Fixes();
-    
-    // 初始化状态
-    initializeState();
-    
-    // 缓存DOM元素
-    cacheDOMElements();
-    
-    // 配置库
-    configureLibraries();
-    
-    // 设置优化的事件处理
-    setupOptimizedEventHandlers();
-    
-    // 内存优化
-    optimizeMemoryUsage();
-    // 初始化认证UI
-    updateAuthUI();
-
-    // 初始化应用
-    initializeApp().then(() => {
-      console.log("应用初始化完成 - iOS 14.4 优化版");
-      // 隐藏loading屏幕
-      const loadingScreen = document.getElementById('loading-screen');
-      if (loadingScreen) {
-        loadingScreen.style.opacity = '0';
+  // 确保 DOM 完全加载后再执行任何操作
+  document.addEventListener('DOMContentLoaded', () => {
+    try {
+      console.log("DOM is ready. Starting initialization..."); // 添加调试信息
+            
+      // 应用iOS 14.4修复
+      applyiOS14Fixes();
+            
+      // 初始化状态
+      initializeState();
+            
+      // 缓存DOM元素
+      cacheDOMElements();
+            
+      // 检查DOM元素是否缓存成功
+      if (!domElements.appContainer) {
+        console.error("FATAL: appContainer not found after caching!");
+        return; // 如果关键元素不存在，则停止执行
       }
-      // 延迟显示主容器
-      setTimeout(() => {
-        if (domElements.appContainer) { // Final check
-            domElements.appContainer.classList.remove("hidden");
+      console.log("DOM elements cached successfully.");
+
+      // 配置库
+      configureLibraries();
+            
+      // 设置优化的事件处理
+      setupOptimizedEventHandlers();
+            
+      // 内存优化
+      optimizeMemoryUsage();
+      // 初始化认证UI
+      updateAuthUI();
+
+      // 初始化应用
+      initializeApp().then(() => {
+        console.log("应用初始化完成 - iOS 14.4 优化版");
+        // 隐藏loading屏幕
+        const loadingScreen = document.getElementById('loading-screen');
+        if (loadingScreen) {
+          loadingScreen.style.opacity = '0';
+          setTimeout(() => loadingScreen.remove(), 300); // 确保动画完成后再移除
         }
-      }, 50);
-    }).catch((error) => {
-      console.error("初始化错误:", error);
-    });
-  } catch (error) {
-    console.error("初始化错误:", error);
-  }
-}
+                
+        // 移除 hidden 类，显示应用
+        if (domElements.appContainer) { // 再次检查以确保安全
+          domElements.appContainer.classList.remove("hidden");
+        }
 
-// === 启动应用 ===
-
-// === 启动应用 ===
-// The script is loaded by index.html after DOMContentLoaded, 
-// so we can initialize immediately.
-initialize();
-
-
-// 隐藏残留的loading屏幕
-setTimeout(() => {
-  const loadingScreen = document.getElementById('loading-screen');
-  if (loadingScreen && !loadingScreen.classList.contains('hidden')) {
-    loadingScreen.style.opacity = '0';
-    setTimeout(() => loadingScreen.remove(), 300);
-  }
-}, 5000);
-
-// 防止内存泄漏的清理函数
-window.addEventListener('beforeunload', () => {
-  if (globalState.requestController) {
-    globalState.requestController.abort();
-  }
-  
-  document.querySelectorAll('.message').forEach(msg => {
-    msg.innerHTML = '';
+      }).catch((error) => {
+        console.error("initializeApp 失败:", error);
+      });
+    } catch (error) {
+      console.error("initialize 函数内部捕获到错误:", error);
+    }
   });
-  
-  globalState = null;
-  domElements = null;
-}, { passive: true });
+}
 
 // 导出主函数
 window.zhiheAI = {
@@ -947,4 +929,9 @@ window.zhiheAI = {
   handleLogout
 };
 
-})();
+// 在脚本加载后立即调用 initialize，它会等待 DOM ready 事件
+initialize();
+
+})(); // 这是 IIFE (Immediately Invoked Function Expression) 的结尾
+
+// <--- 这里应该是文件的结尾，下面不应再有任何代码 --->

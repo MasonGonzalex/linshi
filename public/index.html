@@ -222,87 +222,11 @@
     </script>
 
     <!-- 资源加载管理器 -->
-    <script>
-        (function() {
-            'use strict';
-            
-            const loadingScreen = document.getElementById('loading-screen');
-            let resourcesLoaded = 0;
-            const totalResources = 3; // CSS + 2个核心JS
-            
-            function updateLoadingProgress() {
-                resourcesLoaded++;
-                if (resourcesLoaded >= totalResources) {
-                    // 延迟隐藏加载屏幕，确保样式已应用
-                    setTimeout(() => {
-                        loadingScreen.style.opacity = '0';
-                        loadingScreen.style.transition = 'opacity 0.3s ease-out';
-                        setTimeout(() => {
-                            loadingScreen.remove();
-                        }, 300);
-                    }, 100);
-                }
-            }
-
-            // 动态加载脚本的函数
-            function loadScript(src, onLoad) {
-                return new Promise((resolve, reject) => {
-                    const script = document.createElement('script');
-                    script.src = src;
-                    script.crossOrigin = 'anonymous';
-                    script.referrerPolicy = 'no-referrer';
-                    
-                    script.onload = () => {
-                        updateLoadingProgress();
-                        if (onLoad) onLoad();
-                        resolve();
-                    };
-                    
-                    script.onerror = () => {
-                        console.error('Failed to load script:', src);
-                        updateLoadingProgress(); // 即使失败也要继续
-                        resolve(); // 不阻塞其他资源
-                    };
-                    
-                    document.head.appendChild(script);
-                });
-            }
-
-            // CSS加载完成回调
-            const styleLink = document.querySelector('link[href="style.css"]');
-            if (styleLink) {
-                styleLink.onload = updateLoadingProgress;
-                styleLink.onerror = updateLoadingProgress;
-            } else {
-                updateLoadingProgress(); // 如果CSS已经加载
-            }
-
-            // 顺序加载脚本以避免iOS 14.4的并发问题
-            window.addEventListener('DOMContentLoaded', async () => {
-                try {
-                    // 先加载marked
-                    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js');
-                    
-                    // 再加载highlight.js
-                    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js', () => {
-                        // highlight.js加载完成后立即加载语言包
-                        loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js');
-                        loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js');
-                        loadScript('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js');
-                    });
-                    
-                    // 最后加载主应用脚本
-                    await loadScript('script.js');
-                    
-                } catch (error) {
-                    console.error('Resource loading error:', error);
-                    // 即使出错也要隐藏加载屏幕
-                    setTimeout(() => loadingScreen.remove(), 1000);
-                }
-            });
-
-        })();
-    </script>
+    <!-- 资源加载管理器 (简化版) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- 主应用脚本，使用 defer 确保在DOM解析后执行 -->
+    <script src="script.js" defer></script>
 
     <!-- PWA服务工作者注册 -->
     <script>
