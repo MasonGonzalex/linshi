@@ -200,28 +200,9 @@
             window.addEventListener('orientationchange', function() {
                 setTimeout(updateViewportHeight, 150);
             }, { passive: true });
-
-            // 预加载关键资源
-            function preloadResource(href, as, type) {
-                const link = document.createElement('link');
-                link.rel = 'preload';
-                link.href = href;
-                link.as = as;
-                if (type) link.type = type;
-                link.crossOrigin = 'anonymous';
-                document.head.appendChild(link);
-            }
-
-            // 延迟预加载非关键资源
-            setTimeout(() => {
-                preloadResource('https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js', 'script');
-                preloadResource('https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js', 'script');
-            }, 100);
-
         })();
     </script>
 
-    <!-- 资源加载管理器 -->
     <!-- 资源加载管理器 (简化版) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -262,11 +243,6 @@
                     const perfData = performance.timing;
                     const loadTime = perfData.loadEventEnd - perfData.navigationStart;
                     console.log('页面加载时间:', loadTime + 'ms');
-                    
-                    // iOS 14.4 性能优化提示
-                    if (loadTime > 3000) {
-                        console.warn('加载时间较长，建议检查网络连接');
-                    }
                 }, 100);
             }, { passive: true });
         }

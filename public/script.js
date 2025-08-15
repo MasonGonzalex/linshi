@@ -1,4 +1,4 @@
-// script.js (iOS 14.4 深度优化版 - 解决性能瓶颈和UI遮挡问题)
+// script.js (最终修正版)
 (function() {
 'use strict';
 
@@ -842,81 +842,75 @@ async function updateSessionTitle(userMessage) {
   }
 }
 
-// === 应用初始化 ===
+// === 应用初始化 (最终修正版) ===
 async function initializeApp() {
   globalState.token = localStorage.getItem("accessToken");
   globalState.username = localStorage.getItem("username");
 
+  // 无论是否登录，首先隐藏加载屏幕
+  const loadingScreen = document.getElementById('loading-screen');
+  if (loadingScreen) {
+      loadingScreen.style.opacity = '0';
+      setTimeout(() => loadingScreen.remove(), 500); // 动画结束后移除
+  }
+
+  // 根据登录状态显示正确的视图
   toggleAuthViews(!!globalState.token);
 
   if (globalState.token) {
-    await Promise.allSettled([
-      loadApiProviders(),
-      loadSessions()
-    ]);
-    
-    if (domElements.sendButton) {
-      domElements.sendButton.disabled = true;
+    try {
+        await Promise.allSettled([
+          loadApiProviders(),
+          loadSessions()
+        ]);
+        
+        if (domElements.sendButton) {
+          domElements.sendButton.disabled = true;
+        }
+    } catch (e) {
+        console.error("加载用户数据时出错:", e);
     }
   }
 }
 
 // === 主初始化函数 ===
 function initialize() {
-  // 确保 DOM 完全加载后再执行任何操作
-  document.addEventListener('DOMContentLoaded', () => {
-    try {
-      console.log("DOM is ready. Starting initialization..."); // 添加调试信息
-            
-      // 应用iOS 14.4修复
-      applyiOS14Fixes();
-            
-      // 初始化状态
-      initializeState();
-            
-      // 缓存DOM元素
-      cacheDOMElements();
-            
-      // 检查DOM元素是否缓存成功
-      if (!domElements.appContainer) {
-        console.error("FATAL: appContainer not found after caching!");
-        return; // 如果关键元素不存在，则停止执行
-      }
-      console.log("DOM elements cached successfully.");
+  try {
+    // 应用iOS 14.4修复
+    applyiOS14Fixes();
+    
+    // 初始化状态
+    initializeState();
+    
+    // 缓存DOM元素
+    cacheDOMElements();
 
-      // 配置库
-      configureLibraries();
-            
-      // 设置优化的事件处理
-      setupOptimizedEventHandlers();
-            
-      // 内存优化
-      optimizeMemoryUsage();
-      // 初始化认证UI
-      updateAuthUI();
-
-      // 初始化应用
-      initializeApp().then(() => {
-        console.log("应用初始化完成 - iOS 14.4 优化版");
-        // 隐藏loading屏幕
-        const loadingScreen = document.getElementById('loading-screen');
-        if (loadingScreen) {
-          loadingScreen.style.opacity = '0';
-          setTimeout(() => loadingScreen.remove(), 300); // 确保动画完成后再移除
-        }
-                
-        // 移除 hidden 类，显示应用
-        if (domElements.appContainer) { // 再次检查以确保安全
-          domElements.appContainer.classList.remove("hidden");
-        }
-
-      }).catch((error) => {
-        console.error("initializeApp 失败:", error);
-      });
-    } catch (error) {
-      console.error("initialize 函数内部捕获到错误:", error);
+    if (!domElements.authUsername || !domElements.authPassword) {
+        console.error("FATAL: Auth input elements not found!");
+        return; // 如果认证元素找不到，就停止
     }
-  });
+    
+    // 配置库
+    configureLibraries();
+    
+    // 设置优化的事件处理
+    setupOptimizedEventHandlers();
+    
+    // 内存优化
+    optimizeMemoryUsage();
+    // 初始化认证UI
+    updateAuthUI();
+
+    // 初始化应用
+    initializeApp().then(() => {
+      console.log("应用初始化完成 - iOS 14.4 优化版");
+    }).catch((error) => {
+      console.error("初始化错误:", error);
+    });
+  } catch (error)
+  {
+    console.error("初始化错误:", error);
+  }
 }
 
 // 导出主函数
@@ -929,9 +923,9 @@ window.zhiheAI = {
   handleLogout
 };
 
-// 在脚本加载后立即调用 initialize，它会等待 DOM ready 事件
+})(); // IIFE 在这里正确地结束并执行
+
+// === 启动应用 ===
+// 现在，在 IIFE 外部的全局作用域中，我们安全地调用 initialize 函数。
+// 因为 index.html 中的 defer 属性，我们知道此时 DOM 已经准备好了。
 initialize();
-
-})(); // 这是 IIFE (Immediately Invoked Function Expression) 的结尾
-
-// <--- 这里应该是文件的结尾，下面不应再有任何代码 --->
