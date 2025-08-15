@@ -153,6 +153,10 @@ function initializeState() {
 
 // === DOM 元素缓存 ===
 function cacheDOMElements() {
+  // NEW: Helper function to convert kebab-case to camelCase
+  // e.g., 'app-container' becomes 'appContainer'
+  const kebabToCamel = (str) => str.replace(/-(\w)/g, (_, c) => c.toUpperCase());
+
   const elements = [
     'app-container', 'auth-container', 'auth-form', 'auth-title',
     'auth-username', 'auth-password', 'auth-submit-btn', 'switch-auth-mode',
@@ -160,11 +164,14 @@ function cacheDOMElements() {
     'user-input', 'chat-box', 'model-select', 'username-display',
     'logout-btn', 'history-toggle-btn', 'history-drawer', 'drawer-overlay'
   ];
-  
+
   elements.forEach(id => {
-    domElements[id] = document.getElementById(id);
+    // CHANGED: Convert ID to a camelCase key before storing the element
+    const key = kebabToCamel(id);
+    domElements[key] = document.getElementById(id);
   });
-  
+
+  // This line is fine, 'chatForm' was correctly converted from 'chat-form'
   domElements.sendButton = domElements.chatForm?.querySelector('button[type=submit]');
 }
 
