@@ -874,42 +874,41 @@ async function initializeApp() {
 }
 
 // === 主初始化函数 ===
-function initialize() {
+// === 主初始化函数 (最终重构版 - 显式异步流) ===
+async function initialize() {
   try {
-    // 应用iOS 14.4修复
+    // 步骤 1: 执行所有绝对同步的操作
     applyiOS14Fixes();
-    
-    // 初始化状态
     initializeState();
     
-    // 缓存DOM元素
+    // 步骤 2: 缓存 DOM 元素
     cacheDOMElements();
 
-    if (!domElements.authUsername || !domElements.authPassword) {
-        console.error("FATAL: Auth input elements not found!");
-        return; // 如果认证元素找不到，就停止
+    // 步骤 3: 关键的防御性检查。这是我们的“真相时刻”。
+    // 如果这一行在浏览器控制台打印了 null，那么问题就出在 HTML 或其他地方。
+    console.log("Checking for app-container immediately after caching:", document.getElementById('app-container'));
+    if (!domElements.appContainer || !domElements.authContainer) {
+        console.error("FATAL LOGIC ERROR: Critical DOM elements not found immediately after cacheDOMElements() call. Halting initialization.");
+        // 在屏幕上显示错误，以防用户没开控制台
+        const body = document.querySelector('body');
+        if(body) body.innerHTML = '<h1 style="color:red; text-align:center; margin-top: 50px;">应用初始化失败，关键元素未找到！</h1>';
+        return; // 彻底停止执行
     }
     
-    // 配置库
+    // 步骤 4: 只有在确认 DOM 元素存在后，才继续设置事件监听器和执行后续逻辑
     configureLibraries();
-    
-    // 设置优化的事件处理
     setupOptimizedEventHandlers();
-    
-    // 内存优化
     optimizeMemoryUsage();
-    // 初始化认证UI
     updateAuthUI();
 
-    // 初始化应用
-    initializeApp().then(() => {
-      console.log("应用初始化完成 - iOS 14.4 优化版");
-    }).catch((error) => {
-      console.error("初始化错误:", error);
-    });
-  } catch (error)
-  {
-    console.error("初始化错误:", error);
+    // 步骤 5: 使用 await 显式等待异步的 initializeApp 完成
+    // 这保证了 initializeApp 内部的所有操作都执行完毕后，才会打印最终的日志。
+    await initializeApp();
+    
+    console.log("Application initialization flow fully completed.");
+
+  } catch (error) {
+    console.error("A critical error occurred during the initialization process:", error);
   }
 }
 
