@@ -907,26 +907,11 @@ function initialize() {
 }
 
 // === 启动应用 ===
-// 使用 window.load 事件确保所有资源（包括由其他脚本动态添加的）
-// 都已加载完毕，DOM 已经稳定。
-function startApplication() {
-    // 在启动前再次确认关键元素是否存在
-    if (document.getElementById('app-container') && document.getElementById('auth-container')) {
-        initialize();
-    } else {
-        // 如果关键元素仍不存在，延迟重试，作为最后的保险
-        console.warn("DOM 元素尚未准备好，延迟启动...");
-        setTimeout(startApplication, 100);
-    }
-}
 
-if (document.readyState === 'complete') {
-    // 如果页面已经完全加载，直接启动
-    startApplication();
-} else {
-    // 否则，监听 load 事件
-    window.addEventListener('load', startApplication, { once: true });
-}
+// === 启动应用 ===
+// The script is loaded by index.html after DOMContentLoaded, 
+// so we can initialize immediately.
+initialize();
 
 
 // 隐藏残留的loading屏幕
