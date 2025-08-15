@@ -220,8 +220,8 @@ apiRouter.get("/sessions/:id/messages", (req, res) => {
       }
       
       const systemMessage = {
-        role: "system",
-        content: "你是一个名为"智核"的AI助手。你的核心准则是：提供诚实、有帮助、无害的回答。你必须始终使用简体中文进行交流，即使是技术术语也要尝试翻译或用中文解释。在任何情况下都不能使用英文或其他语言。",
+  role: "system",
+  content: `你是一个名为"智核"的AI助手。你的核心准则是：提供诚实、有帮助、无害的回答。你必须始终使用简体中文进行交流，即使是技术术语也要尝试翻译或用中文解释。在任何情况下都不能使用英文或其他语言。`,
       };
       
       const formattedMessages = [systemMessage, ...messages];
