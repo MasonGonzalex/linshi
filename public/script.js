@@ -153,8 +153,6 @@ function initializeState() {
 
 // === DOM 元素缓存 ===
 function cacheDOMElements() {
-  // NEW: Helper function to convert kebab-case to camelCase
-  // e.g., 'app-container' becomes 'appContainer'
   const kebabToCamel = (str) => str.replace(/-(\w)/g, (_, c) => c.toUpperCase());
 
   const elements = [
@@ -166,12 +164,10 @@ function cacheDOMElements() {
   ];
 
   elements.forEach(id => {
-    // CHANGED: Convert ID to a camelCase key before storing the element
     const key = kebabToCamel(id);
     domElements[key] = document.getElementById(id);
   });
 
-  // This line is fine, 'chatForm' was correctly converted from 'chat-form'
   domElements.sendButton = domElements.chatForm?.querySelector('button[type=submit]');
 }
 
@@ -213,11 +209,11 @@ function updateAuthUI() {
   if (globalState.isRegisterMode) {
     domElements.authTitle.textContent = "注册";
     domElements.authSubmitBtn.textContent = "注册";
-    domElements.switchAuthModeBtn.textContent = "已有账号？点击登录";
+    domElements.switchAuthMode.textContent = "已有账号？点击登录";
   } else {
     domElements.authTitle.textContent = "登录";
     domElements.authSubmitBtn.textContent = "登录";
-    domElements.switchAuthModeBtn.textContent = "没有账号？点击注册";
+    domElements.switchAuthMode.textContent = "没有账号？点击注册";
   }
 }
 
@@ -898,7 +894,9 @@ function initialize() {
       }
       // 延迟显示主容器
       setTimeout(() => {
-        domElements.appContainer.classList.remove("hidden");
+        if (domElements.appContainer) { // Final check
+            domElements.appContainer.classList.remove("hidden");
+        }
       }, 50);
     }).catch((error) => {
       console.error("初始化错误:", error);
@@ -908,49 +906,28 @@ function initialize() {
   }
 }
 
-// 检测应用是否准备就绪
-function checkAppReady() {
-  return new Promise((resolve) => {
-    let attempts = 0;
-    const maxAttempts = 50;
-    
-    const checkInterval = setInterval(() => {
-      attempts++;
-      
-      if (domElements.userInput && domElements.sendButton && globalState.token) {
-        clearInterval(checkInterval);
-        resolve(true);
-      }
-      
-      if (attempts >= maxAttempts) {
-        clearInterval(checkInterval);
-        resolve(false);
-      }
-    }, 100);
-  });
-}
-
 // === 启动应用 ===
 // 使用 window.load 事件确保所有资源（包括由其他脚本动态添加的）
 // 都已加载完毕，DOM 已经稳定。
 function startApplication() {
-  // 在启动前再次确认关键元素是否存在
-  if (document.getElementById('app-container') && document.getElementById('auth-container')) {
-    initialize();
-  } else {
-    // 如果关键元素仍不存在，延迟重试，作为最后的保险
-    console.warn("DOM 元素尚未准备好，延迟启动...");
-    setTimeout(startApplication, 100);
-  }
+    // 在启动前再次确认关键元素是否存在
+    if (document.getElementById('app-container') && document.getElementById('auth-container')) {
+        initialize();
+    } else {
+        // 如果关键元素仍不存在，延迟重试，作为最后的保险
+        console.warn("DOM 元素尚未准备好，延迟启动...");
+        setTimeout(startApplication, 100);
+    }
 }
 
 if (document.readyState === 'complete') {
-  // 如果页面已经完全加载，直接启动
-  startApplication();
+    // 如果页面已经完全加载，直接启动
+    startApplication();
 } else {
-  // 否则，监听 load 事件
-  window.addEventListener('load', startApplication, { once: true });
+    // 否则，监听 load 事件
+    window.addEventListener('load', startApplication, { once: true });
 }
+
 
 // 隐藏残留的loading屏幕
 setTimeout(() => {
